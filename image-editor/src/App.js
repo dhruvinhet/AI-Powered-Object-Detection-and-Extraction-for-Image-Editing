@@ -50,13 +50,19 @@ function App() {
         box: detection.box,
         mask: detection.mask
       });
-      setExtractedImage(response.data.image);
-      setOriginalExtractedImage(response.data.image);
+
+      // Check for valid image before setting state
+      if (response.data.image && response.data.image.trim() !== '') {
+        console.log("Extracted Image:", response.data.image);  // Debugging
+        setExtractedImage(response.data.image);
+        setOriginalExtractedImage(response.data.image);
+      }
     };
   };
 
   useEffect(() => {
     if (!originalExtractedImage) return;
+
     const img = new Image();
     img.src = `data:image/png;base64,${originalExtractedImage}`;
     img.onload = () => {
@@ -64,6 +70,7 @@ function App() {
       const ctx = canvas.getContext('2d');
       canvas.width = img.width;
       canvas.height = img.height;
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.filter = `brightness(${brightness}) contrast(${contrast}) saturate(${saturation}) blur(${blur}px)`;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -73,13 +80,19 @@ function App() {
       if (flipVertical) ctx.scale(1, -1);
       ctx.rotate((rotation * Math.PI) / 180);
       ctx.translate(-canvas.width / 2, -canvas.height / 2);
-      
+
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      setExtractedImage(canvas.toDataURL('image/png').split(',')[1]);
+      
+      const updatedImage = canvas.toDataURL('image/png').split(',')[1];
+
+      if (updatedImage && updatedImage.trim() !== '') {
+        setExtractedImage(updatedImage);
+      }
     };
   }, [brightness, contrast, saturation, blur, rotation, flipHorizontal, flipVertical]);
 
   const handleSave = () => {
+    if (!extractedImage) return;
     const link = document.createElement('a');
     link.href = `data:image/png;base64,${extractedImage}`;
     link.download = 'edited_image.png';
@@ -96,6 +109,7 @@ function App() {
         </label>
         <Button variant="contained" onClick={handleDetect} disabled={!image}>Detect Objects</Button>
       </Box>
+
       {detections.length > 0 && (
         <Box mt={2}>
           <Typography variant="h5">Detected Objects</Typography>
@@ -113,11 +127,17 @@ function App() {
           </Grid>
         </Box>
       )}
-      {extractedImage && (
+
+      {extractedImage && extractedImage.trim() !== '' && (
         <Box mt={4}>
           <Typography variant="h5" gutterBottom>Extracted Image</Typography>
           <Card>
-            <CardMedia component="img" image={`data:image/png;base64,${extractedImage}`} alt="Extracted" sx={{ maxWidth: '100%', marginBottom: 2 }} />
+            
+          <img 
+            src={`data:image/png;base64,${extractedImage}`} 
+            alt="Extracted" 
+            style={{ maxWidth: '100%', display: 'block', margin: 'auto', backgroundColor: 'transparent' }} 
+          />
           </Card>
           <Box>
             <Typography>Brightness</Typography>
@@ -130,12 +150,20 @@ function App() {
             <Slider value={blur} min={0} max={10} step={0.5} onChange={(e, val) => setBlur(val)} />
             <Typography>Rotate</Typography>
             <Slider value={rotation} min={-180} max={180} step={1} onChange={(e, val) => setRotation(val)} />
+
             <Box mt={2}>
-              <Button variant="contained" onClick={() => setFlipHorizontal(!flipHorizontal)} sx={{ marginRight: 2 }}>Flip Horizontal</Button>
-              <Button variant="contained" onClick={() => setFlipVertical(!flipVertical)}>Flip Vertical</Button>
+              <Button variant="contained" onClick={() => setFlipHorizontal(!flipHorizontal)} sx={{ marginRight: 2 }}>
+                Flip Horizontal
+              </Button>
+              <Button variant="contained" onClick={() => setFlipVertical(!flipVertical)}>
+                Flip Vertical
+              </Button>
             </Box>
+
             <Box mt={3}>
-              <Button variant="contained" onClick={handleSave} sx={{ width: '100%', padding: 1.5 }}>Save Image</Button>
+              <Button variant="contained" onClick={handleSave} sx={{ width: '100%', padding: 1.5 }}>
+                Save Image
+              </Button>
             </Box>
           </Box>
         </Box>
@@ -144,4 +172,4 @@ function App() {
   );
 }
 
-export default App;
+export default App; 
