@@ -2,16 +2,26 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
-import { Container, Typography, Button, Slider, Box, Grid, Card, CardContent, CardMedia, Fade, Grow } from '@mui/material';
+import { 
+  Container, 
+  Typography, 
+  Button, 
+  Slider, 
+  Box, 
+  Grid, 
+  Card, 
+  CardContent, 
+  CardMedia, 
+  Fade, 
+  Grow 
+} from '@mui/material';
 import { styled, keyframes } from '@mui/system';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import Lottie from 'lottie-react';
 import loadingAnimation from './assets/loading.json';
-import aiAnimation from './assets/ai-process.json'; // Add an AI-related animation JSON file
+import aiAnimation from './assets/ai-process.json';
 import { useDropzone } from 'react-dropzone';
 import './App.css';
-import ObjectDetection from './ObjectDetection';
-import ExtractedImage from './ExtractedImage';
 
 const pulse = keyframes`
   0% { transform: scale(1); }
@@ -50,9 +60,9 @@ const theme = createTheme({
             transform: 'translateY(-2px)',
             boxShadow: '0 6px 20px rgba(0, 0, 0, 0.2)',
             animation: `${pulse} 1.5s infinite`,
-          }
-        }
-      }
+          },
+        },
+      },
     },
     MuiCard: {
       styleOverrides: {
@@ -66,11 +76,11 @@ const theme = createTheme({
             transform: 'translateY(-6px)',
             boxShadow: '0 10px 30px rgba(0, 0, 0, 0.25)',
             animation: `${glow} 2s infinite`,
-          }
-        }
-      }
-    }
-  }
+          },
+        },
+      },
+    },
+  },
 });
 
 const StyledSlider = styled(Slider)(({ theme }) => ({
@@ -80,12 +90,12 @@ const StyledSlider = styled(Slider)(({ theme }) => ({
     transition: 'all 0.2s ease',
     '&:hover': {
       boxShadow: '0 0 0 12px rgba(110, 133, 183, 0.3)',
-    }
+    },
   },
   '& .MuiSlider-rail': {
     opacity: 0.2,
     background: 'linear-gradient(90deg, #6e85b7, #f4a261)',
-  }
+  },
 }));
 
 const DropZoneBox = styled(Box)(({ theme, isAnalyzing }) => ({
@@ -101,12 +111,8 @@ const DropZoneBox = styled(Box)(({ theme, isAnalyzing }) => ({
     background: 'rgba(255, 255, 255, 0.06)',
     borderColor: theme.palette.secondary.main,
     transform: 'scale(1.02)',
-  }
+  },
 }));
-
-const Input = styled('input')({
-  display: 'none',
-});
 
 function App() {
   const [image, setImage] = useState(null);
@@ -125,6 +131,8 @@ function App() {
   const [result, setResult] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
+  const [animationVideo, setAnimationVideo] = useState(null);
+  const [selectedLabel, setSelectedLabel] = useState(null);
 
   const { getRootProps, getInputProps } = useDropzone({
     accept: "image/*",
@@ -160,26 +168,6 @@ function App() {
     }
   };
 
-  const handleImageUpload = (event) => {
-    setSelectedFile(event.target.files[0]);
-    setImage(event.target.files[0]);
-  };
-
-  const handleDetect = async () => {
-    if (!image) return;
-    const formData = new FormData();
-    formData.append('image', image);
-
-    try {
-      const response = await axios.post('http://localhost:5000/detect', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
-      setDetections(response.data);
-    } catch (error) {
-      console.error("Error detecting objects:", error);
-    }
-  };
-
   const handleExtract = async (detection) => {
     setIsExtracting(true);
     const reader = new FileReader();
@@ -189,15 +177,36 @@ function App() {
       const response = await axios.post('http://localhost:5000/extract', {
         image: base64Image,
         box: detection.box,
-        mask: detection.mask
       });
 
       if (response.data.image && response.data.image.trim() !== '') {
         setExtractedImage(`data:image/png;base64,${response.data.image}`);
         setOriginalExtractedImage(response.data.image);
+        setSelectedLabel(detection.label); // Store label for animation
       }
-      setTimeout(() => setIsExtracting(false), 1500); // Animation duration
+      setTimeout(() => setIsExtracting(false), 1500);
     };
+  };
+
+  const handleAnimate = async () => {
+    if (!originalExtractedImage || !selectedLabel) return;
+
+    setLoading(true);
+    try {
+      const response = await axios.post('http://localhost:5000/animate', {
+        image: originalExtractedImage, // Base64 without prefix
+        label: selectedLabel,
+      }, {
+        responseType: 'blob', // Expect binary video data
+      });
+
+      const videoUrl = URL.createObjectURL(response.data);
+      setAnimationVideo(videoUrl);
+    } catch (error) {
+      console.error("Error generating animation video:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -224,14 +233,13 @@ function App() {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       
       const updatedImage = canvas.toDataURL('image/png').split(',')[1];
-
       if (updatedImage && updatedImage.trim() !== '') {
         setExtractedImage(`data:image/png;base64,${updatedImage}`);
       }
     };
   }, [brightness, contrast, saturation, blur, rotation, flipHorizontal, flipVertical]);
 
-  const handleSave = () => {
+  const handleSaveImage = () => {
     if (!extractedImage) return;
     const link = document.createElement('a');
     link.href = extractedImage;
@@ -239,225 +247,317 @@ function App() {
     link.click();
   };
 
- return (
-  <ThemeProvider theme={theme}>
-    <CssBaseline />
-    <Container
-    maxWidth="lg"
-    sx={{
-      minHeight: "100vh",
-      background: 'linear-gradient(45deg, #1a1a2e 0%, #16213e 100%)',
-      padding: '40px 20px',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-    }}
-    >
-    <Fade in={true} timeout={1000}>
-      <Box textAlign="center" mb={6}>
-      <Typography 
-        variant="h3" 
-        sx={{ 
-        background: 'linear-gradient(45deg, #6e85b7, #f4a261)',
-        WebkitBackgroundClip: 'text',
-        WebkitTextFillColor: 'transparent',
-        textShadow: '0 2px 10px rgba(110, 133, 183, 0.5)',
-        }}
-      >
-        AI Object Detection Studio
-      </Typography>
-      <Typography 
-        variant="h6" 
-        sx={{ 
-        color: 'rgba(255, 255, 255, 0.7)',
-        mt: 1,
-        animation: `${pulse} 2s infinite`,
-        }}
-      >
-        Powered by Advanced Computer Vision
-      </Typography>
-      </Box>
-    </Fade>
+  const handleDownloadVideo = () => {
+    if (!animationVideo) return;
+    const link = document.createElement('a');
+    link.href = animationVideo;
+    link.download = `${selectedLabel}_animation.mp4`;
+    link.click();
+  };
 
-    <DropZoneBox {...getRootProps()} isAnalyzing={isAnalyzing}>
-      <input {...getInputProps()} />
-      <CloudUploadIcon sx={{ fontSize: 60, color: 'primary.main', mb: 2, animation: `${glow} 3s infinite` }} />
-      <Typography variant="h6" sx={{ color: 'white' }}>
-      Drop your image here or click to upload
-      </Typography>
-      <Typography sx={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-      Supports all common image formats
-      </Typography>
-    </DropZoneBox>
-
-    {selectedFile && (
-      <Grow in={true} timeout={800}>
-      <Card sx={{ mt: 4, width: '100%', maxWidth: isAnalyzing ? 800 : 600 }}>
-        <CardMedia
-        component="img"
-        image={URL.createObjectURL(selectedFile)}
-        alt="Uploaded Image"
+  return (
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Container
+        maxWidth="lg"
         sx={{
-          borderRadius: '12px',
-          maxHeight: 400,
-          objectFit: 'contain',
-          background: 'rgba(255, 255, 255, 0.03)',
-          filter: isAnalyzing ? 'brightness(1.1)' : 'none',
-          transition: 'all 0.5s ease',
+          minHeight: "100vh",
+          background: 'linear-gradient(45deg, #1a1a2e 0%, #16213e 100%)',
+          padding: '40px 20px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
         }}
-        />
-      </Card>
-      </Grow>
-    )}
-
-    <Button 
-      variant="contained" 
-      color="primary" 
-      onClick={handleUpload} 
-      disabled={!selectedFile || loading}
-      sx={{ mt: 3, px: 6 }}
-    >
-      {loading ? (
-      <Lottie animationData={loadingAnimation} style={{ width: 80, height: 80 }} />
-      ) : (
-      'Analyze Image'
-      )}
-    </Button>
-
-    {result && (
-      <Box mt={6} width="100%">
-      <Typography variant="h5" sx={{ mb: 3, color: 'white', textShadow: '0 2px 8px rgba(0, 0, 0, 0.3)' }}>
-        Detection Results
-      </Typography>
-      <Grid container spacing={3}>
-        {result.map((obj, index) => (
-        <Grid item xs={12} sm={6} md={4} key={index}>
-          <Grow in={true} timeout={500 + index * 200}>
-          <Card>
-            <CardContent>
-            <Typography variant="h6" sx={{ color: 'secondary.main' }}>
-              {obj.label.toUpperCase()}
-            </Typography>
-            <Typography sx={{ color: 'rgba(255, 255, 255, 0.7)', mt: 1 }}>
-              Confidence: {(obj.score * 100).toFixed(1)}%
-            </Typography>
-            <Box sx={{ mt: 2 }}>
-              <StyledSlider
-              value={obj.score * 100}
-              max={100}
-              disabled
-              />
-            </Box>
-            <Button
-              variant="outlined"
-              color="secondary"
-              onClick={() => handleExtract(obj)}
-              sx={{ mt: 2, width: '100%' }}
+      >
+        <Fade in={true} timeout={1000}>
+          <Box textAlign="center" mb={6}>
+            <Typography 
+              variant="h3" 
+              sx={{ 
+                background: 'linear-gradient(45deg, #6e85b7, #f4a261)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                textShadow: '0 2px 10px rgba(110, 133, 183, 0.5)',
+              }}
             >
-              Extract Object
-            </Button>
-            {isExtracting && (
-              <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-              <Lottie animationData={aiAnimation} style={{ width: 150, height: 150 }} />
-              </Box>
-            )}
-            </CardContent>
-          </Card>
-          </Grow>
-        </Grid>
-        ))}
-      </Grid>
-      </Box>
-    )}
+              AI Object Detection Studio
+            </Typography>
+            <Typography 
+              variant="h6" 
+              sx={{ 
+                color: 'rgba(255, 255, 255, 0.7)', 
+                mt: 1,
+                animation: `${pulse} 2s infinite`,
+              }}
+            >
+              Powered by Advanced Computer Vision
+            </Typography>
+          </Box>
+        </Fade>
 
-    {extractedImage && (
-      <Box mt={6} width="100%" display="flex" justifyContent="center">
-      <Card sx={{ p: 3, position: 'relative', maxWidth: 600 }}>
-        <Typography variant="h5" sx={{ mb: 3, color: 'white', textShadow: '0 2px 8px rgba(0, 0, 0, 0.3)' }}>
-        Image Editor
-        </Typography>
-        <Box sx={{ position: 'relative', mb: 3 }}>
-        <img 
-          src={extractedImage} 
-          alt="Extracted" 
-          style={{ 
-          maxWidth: '100%', 
-          borderRadius: 8,
-          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2)',
-          transition: 'all 0.3s ease',
-          }} 
-        />
-        <Box
-          sx={{
-          position: 'absolute',
-          top: -10,
-          left: -10,
-          right: -10,
-          bottom: -10,
-          borderRadius: 12,
-          background: 'radial-gradient(circle, rgba(110, 133, 183, 0.2) 0%, rgba(110, 133, 183, 0) 70%)',
-          animation: `${pulse} 2s infinite`,
-          zIndex: -1,
-          }}
-        />
-        </Box>
-        
-        {/* Editor Controls */}
-        {[
-        { label: 'Brightness', value: brightness, min: 0.5, max: 2, step: 0.1, set: setBrightness },
-        { label: 'Contrast', value: contrast, min: 0.5, max: 2, step: 0.1, set: setContrast },
-        { label: 'Saturation', value: saturation, min: 0.5, max: 2, step: 0.1, set: setSaturation },
-        { label: 'Blur', value: blur, min: 0, max: 10, step: 0.5, set: setBlur },
-        { label: 'Rotate', value: rotation, min: -180, max: 180, step: 1, set: setRotation },
-        ].map((control) => (
-        <Box key={control.label} sx={{ mb: 2 }}>
-          <Typography sx={{ color: 'white', mb: 1 }}>{control.label}</Typography>
-          <StyledSlider
-          value={control.value}
-          min={control.min}
-          max={control.max}
-          step={control.step}
-          onChange={(e, val) => control.set(val)}
+        <DropZoneBox {...getRootProps()} isAnalyzing={isAnalyzing}>
+          <input {...getInputProps()} />
+          <CloudUploadIcon 
+            sx={{ 
+              fontSize: 60, 
+              color: 'primary.main', 
+              mb: 2, 
+              animation: `${glow} 3s infinite` 
+            }} 
           />
-        </Box>
-        ))}
+          <Typography variant="h6" sx={{ color: 'white' }}>
+            Drop your image here or click to upload
+          </Typography>
+          <Typography sx={{ color: 'rgba(255, 255, 255, 0.5)' }}>
+            Supports all common image formats
+          </Typography>
+        </DropZoneBox>
 
-        <Grid container spacing={2} sx={{ mt: 2 }}>
-        <Grid item xs={6}>
-          <Button
-          variant="outlined"
-          color="secondary"
-          onClick={() => setFlipHorizontal(!flipHorizontal)}
-          fullWidth
-          >
-          Flip H
-          </Button>
-        </Grid>
-        <Grid item xs={6}>
-          <Button
-          variant="outlined"
-          color="secondary"
-          onClick={() => setFlipVertical(!flipVertical)}
-          fullWidth
-          >
-          Flip V
-          </Button>
-        </Grid>
-        </Grid>
+        {selectedFile && (
+          <Grow in={true} timeout={800}>
+            <Card sx={{ mt: 4, width: '100%', maxWidth: isAnalyzing ? 800 : 600 }}>
+              <CardMedia
+                component="img"
+                image={URL.createObjectURL(selectedFile)}
+                alt="Uploaded Image"
+                sx={{
+                  borderRadius: '12px',
+                  maxHeight: 400,
+                  objectFit: 'contain',
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  filter: isAnalyzing ? 'brightness(1.1)' : 'none',
+                  transition: 'all 0.5s ease',
+                }}
+              />
+            </Card>
+          </Grow>
+        )}
 
-        <Button
-        variant="contained"
-        color="primary"
-        onClick={handleSave}
-        sx={{ mt: 3, width: '100%' }}
+        <Button 
+          variant="contained" 
+          color="primary" 
+          onClick={handleUpload} 
+          disabled={!selectedFile || loading}
+          sx={{ mt: 3, px: 6 }}
         >
-        Save Edited Image
+          {loading ? (
+            <Lottie animationData={loadingAnimation} style={{ width: 80, height: 80 }} />
+          ) : (
+            'Analyze Image'
+          )}
         </Button>
-      </Card>
-      </Box>
-    )}
-    </Container>
-  </ThemeProvider>
+
+        {result && (
+          <Box mt={6} width="100%">
+            <Typography 
+              variant="h5" 
+              sx={{ 
+                mb: 3, 
+                color: 'white', 
+                textShadow: '0 2px 8px rgba(0, 0, 0, 0.3)' 
+              }}
+            >
+              Detection Results
+            </Typography>
+            <Grid container spacing={3}>
+              {result.map((obj, index) => (
+                <Grid item xs={12} sm={6} md={4} key={index}>
+                  <Grow in={true} timeout={500 + index * 200}>
+                    <Card>
+                      <CardContent>
+                        <Typography 
+                          variant="h6" 
+                          sx={{ color: 'secondary.main' }}
+                        >
+                          {obj.label.toUpperCase()}
+                        </Typography>
+                        <Typography 
+                          sx={{ color: 'rgba(255, 255, 255, 0.7)', mt: 1 }}
+                        >
+                          Confidence: {(obj.score * 100).toFixed(1)}%
+                        </Typography>
+                        <Box sx={{ mt: 2 }}>
+                          <StyledSlider
+                            value={obj.score * 100}
+                            max={100}
+                            disabled
+                          />
+                        </Box>
+                        <Button
+                          variant="outlined"
+                          color="secondary"
+                          onClick={() => handleExtract(obj)}
+                          sx={{ mt: 2, width: '100%' }}
+                        >
+                          Extract Object
+                        </Button>
+                        {isExtracting && (
+                          <Box 
+                            sx={{ 
+                              position: 'absolute', 
+                              top: 0, 
+                              left: 0, 
+                              right: 0, 
+                              bottom: 0, 
+                              display: 'flex', 
+                              justifyContent: 'center', 
+                              alignItems: 'center' 
+                            }}
+                          >
+                            <Lottie 
+                              animationData={aiAnimation} 
+                              style={{ width: 150, height: 150 }} 
+                            />
+                          </Box>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </Grow>
+                </Grid>
+              ))}
+            </Grid>
+          </Box>
+        )}
+
+        {extractedImage && (
+          <Box mt={6} width="100%" display="flex" justifyContent="center">
+            <Card sx={{ p: 3, position: 'relative', maxWidth: 600 }}>
+              <Typography 
+                variant="h5" 
+                sx={{ 
+                  mb: 3, 
+                  color: 'white', 
+                  textShadow: '0 2px 8px rgba(0, 0, 0, 0.3)' 
+                }}
+              >
+                Image Editor
+              </Typography>
+              <Box sx={{ position: 'relative', mb: 3 }}>
+                <img 
+                  src={extractedImage} 
+                  alt="Extracted" 
+                  style={{ 
+                    maxWidth: '100%', 
+                    borderRadius: 8,
+                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2)',
+                    transition: 'all 0.3s ease',
+                  }} 
+                />
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    top: -10,
+                    left: -10,
+                    right: -10,
+                    bottom: -10,
+                    borderRadius: 12,
+                    background: 'radial-gradient(circle, rgba(110, 133, 183, 0.2) 0%, rgba(110, 133, 183, 0) 70%)',
+                    animation: `${pulse} 2s infinite`,
+                    zIndex: -1,
+                  }}
+                />
+              </Box>
+              
+              {/* Editor Controls */}
+              {[
+                { label: 'Brightness', value: brightness, min: 0.5, max: 2, step: 0.1, set: setBrightness },
+                { label: 'Contrast', value: contrast, min: 0.5, max: 2, step: 0.1, set: setContrast },
+                { label: 'Saturation', value: saturation, min: 0.5, max: 2, step: 0.1, set: setSaturation },
+                { label: 'Blur', value: blur, min: 0, max: 10, step: 0.5, set: setBlur },
+                { label: 'Rotate', value: rotation, min: -180, max: 180, step: 1, set: setRotation },
+              ].map((control) => (
+                <Box key={control.label} sx={{ mb: 2 }}>
+                  <Typography sx={{ color: 'white', mb: 1 }}>
+                    {control.label}
+                  </Typography>
+                  <StyledSlider
+                    value={control.value}
+                    min={control.min}
+                    max={control.max}
+                    step={control.step}
+                    onChange={(e, val) => control.set(val)}
+                  />
+                </Box>
+              ))}
+
+              <Grid container spacing={2} sx={{ mt: 2 }}>
+                <Grid item xs={6}>
+                  <Button
+                    variant="outlined"
+                    color="secondary"
+                    onClick={() => setFlipHorizontal(!flipHorizontal)}
+                    fullWidth
+                  >
+                    Flip H
+                  </Button>
+                </Grid>
+                <Grid item xs={6}>
+                  <Button
+                    variant="outlined"
+                    color="secondary"
+                    onClick={() => setFlipVertical(!flipVertical)}
+                    fullWidth
+                  >
+                    Flip V
+                  </Button>
+                </Grid>
+              </Grid>
+
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleAnimate}
+                disabled={loading}
+                sx={{ mt: 3, width: '100%' }}
+              >
+                {loading ? (
+                  <Lottie animationData={loadingAnimation} style={{ width: 80, height: 80 }} />
+                ) : (
+                  'Animate Object'
+                )}
+              </Button>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleSaveImage}
+                sx={{ mt: 3, width: '100%' }}
+              >
+                Save Edited Image
+              </Button>
+
+              {/* Animation Video Display */}
+              {animationVideo && (
+                <Box mt={4} textAlign="center">
+                  <Typography 
+                    variant="h6" 
+                    sx={{ color: 'white', mb: 2 }}
+                  >
+                    Animated Video
+                  </Typography>
+                  <video 
+                    controls 
+                    src={animationVideo} 
+                    style={{ 
+                      maxWidth: '100%', 
+                      borderRadius: 8, 
+                      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2)' 
+                    }} 
+                  />
+                  <Button
+                    variant="contained"
+                    color="secondary"
+                    onClick={handleDownloadVideo}
+                    sx={{ mt: 2 }}
+                  >
+                    Download Video
+                  </Button>
+                </Box>
+              )}
+            </Card>
+          </Box>
+        )}
+      </Container>
+    </ThemeProvider>
   );
 }
 

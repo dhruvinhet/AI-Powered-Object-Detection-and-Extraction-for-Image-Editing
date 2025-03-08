@@ -56,3 +56,16 @@
 .MuiSlider-root {
   margin: 10px 0;
 }
+
+@keyframes runAcrossScreen{
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+.running-object{
+  position: absolute;
+  animation: runAcrossScreen 5s linear infinite;
+}
