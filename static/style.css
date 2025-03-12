@@ -376,6 +376,7 @@ code {
     border-right: none; /* Remove cursor after typing completes */
 }
 
+
 @keyframes blink {
     50% { border-right-color: transparent; }
 }

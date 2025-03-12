@@ -8,6 +8,13 @@ document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.setAttribute('data-theme', 'dark');
     }
 
+    // Error handling for failed resource loading
+    window.addEventListener('error', (event) => {
+        if (event.target.tagName === 'SCRIPT' || event.target.tagName === 'LINK') {
+            console.error(`Failed to load resource: ${event.target.src || event.target.href}`);
+        }
+    });
+
     themeToggle.addEventListener('click', () => {
         const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
         document.documentElement.setAttribute('data-theme', theme);
