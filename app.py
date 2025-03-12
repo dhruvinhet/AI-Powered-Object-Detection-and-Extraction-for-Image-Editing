@@ -9,6 +9,7 @@ import torch
 from segment_anything import sam_model_registry, SamPredictor
 import os
 from diffusers import StableDiffusionPipeline
+from flask import render_template
 
 app = Flask(__name__)
 CORS(app)
@@ -254,6 +255,21 @@ def place_image(canvas, obj, x, y):
     # Update the canvas with the combined RGB and original alpha
     canvas[y:y + obj_h, x:x + obj_w, :3] = combined
     canvas[y:y + obj_h, x:x + obj_w, 3] = cv2.bitwise_or(canvas[y:y + obj_h, x:x + obj_w, 3], mask)
-    
+
+@app.route('/')
+def home():
+    return render_template('index.html')
+
+@app.route('/generator')
+def generator():
+    return render_template('generator.html')
+
+@app.route('/extraction')
+def extraction():
+    return render_template('extraction.html')
+
+@app.route('/creator')
+def creator():
+    return render_template('creator.html')
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)

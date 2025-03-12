@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI4Image</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <canvas id="particle-canvas"></canvas>
+    <nav class="navbar">
+        <a href="/" class="logo">AI4Image</a>
+        <ul class="nav-links">
+            <li><a href="generator.html">Image Generator</a></li>
+            <li><a href="extraction.html">Image Extraction</a></li>
+            <li><a href="creator.html">Creator</a></li>
+        </ul>
+        <button id="theme-toggle" class="glow-btn">Toggle Theme</button>
+    </nav>
+    <div class="hero">
+        <h1>Unlock the Power of AI Imaging</h1>
+        <p>Create, extract, and animate with cutting-edge technology.</p>
+        <div class="hero-glow"></div>
+    </div>
+
+    <div class="container">
+        <h1 class="neon-text">AI4Image Tool Features</h1>
+        <h2 class="feature-title">See all features</h2>
+        <div class="features-grid">
+            <div class="feature-card">
+                <h3>Image Generator</h3>
+                <ul>
+                    <li>AI4Image allows you to create stunning images from text prompts using AI models.</li>
+                    <li>Download generated images easily if you like.</li>
+                    <li>Experience real-time previews and save your creations with easily.</li>
+                </ul>
+
+            </div>
+            <div class="feature-card">
+                <h3>Image Extractor</h3>
+                <ul>
+                    <li>Extract specific objects or regions from images with precision using AI-powered detection.</li>
+                    <li>Edit and enhance extracted images with tools like brightness, contrast, and text overlay.</li>
+                    <li>Instantly Download extracted objects.</li>
+                </ul>
+
+            </div>
+            <div class="feature-card">
+                <h3>Future Ideas to Implement</h3>
+                <ul>
+                    <li>Extracting image without any anomly.</li>
+                    <li>Add New Feature for image to Video Generator.</li>
+                    <li>Develop AI-driven image enhancement with automatic style transfer features.</li>
+                </ul>
+
+            </div>
+        </div>
+        <button class="glow-btn explore-btn">Explore More</button>
+
+        <!-- How to Use Section -->
+        <div class="how-to-use-section">
+            <h2 class="feature-title">How to Use AI4Image</h2>
+            <p class="how-to-description">Follow these steps to get started with AI4Image. Below is an example of extracting and posting an image on the website.</p>
+            <div class="how-to-steps">
+                <div class="step-card">
+                    <h3>Step 1: Upload an Image</h3>
+                    <p>Go to the <a href="extraction.html">Image Extraction</a> page. Click the "Choose File" button and upload an image (e.g., a sample photo) <img src="photo-1600259828526-77f8617ceec9.jpeg" alt="Sample Image" class="sample-image"></p>
+                </div>
+                <div class="step-card">
+                    <h3>Step 2: Extract Objects</h3>
+                    <p>Click "Detect Objects" to identify and extract specific parts of the image (e.g., a person or object). Select an object (e.g., a car) and use the "Extract" button to isolate it.</p>
+                </div>
+                <div class="step-card">
+                    <h3>Step 3: Edit Extracted Image</h3>
+                    <p>After extracting, edit the image (e.g., add text or adjust brightness) and download it. Use the downloaded image to post on your website.</p>
+                    <img src="extracted_image (2).png" alt="Posted Image" class="sample-image" width="600" height = "100" margin="auto">    
+                </div>
+            </div>
+            <div class="flowchart-animation">
+                <h3 class="feature-title">Image Extraction Process Flow</h3>
+                <div class="flowchart-container">
+                    <div class="flowchart-step" data-step="1">Upload Image</div>
+                    <div class="flowchart-step" data-step="2">Detect Objects</div>
+                    <div class="flowchart-step" data-step="3">Extract Object</div>
+                    <div class="flowchart-step" data-step="4">Edit & Animate</div>
+                    <div class="flowchart-step" data-step="5">Download Easily</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="background-orb"></div>
+
+    <script src="../static/script.js"></script>
+</body>
+</html>
