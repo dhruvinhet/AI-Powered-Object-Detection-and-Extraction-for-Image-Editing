@@ -6,11 +6,26 @@
     <title>AI4Image - Image Extraction</title>
     <link rel="stylesheet" href="../static/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        .image-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .image-container img {
+            max-width: 100%;
+            height: auto;
+        }
+        .image-wrapper {
+            position: relative;
+        }
+    </style>
 </head>
 <body>
     <canvas id="particle-canvas"></canvas>
     <nav class="navbar">
-        <a href="index.html"class="logo">AI4Image</a>
+        <a href="index.html" class="logo">AI4Image</a>
         <ul class="nav-links">
             <li><a href="generator.html">Image Generator</a></li>
             <li><a href="extraction.html">Image Extraction</a></li>
@@ -27,14 +42,22 @@
         </div>
         <div id="detectionResults" class="results-grid"></div>
         <div id="extractedImage" class="extracted-container"></div>
+        <div id="feedback-instructions" style="display: none; margin-top: 1rem; color: var(--text-color); text-align: center;">
+            Click on the full image to refine segmentation (left click to include, right click to exclude). Press 'Enter' to submit feedback.
+        </div>
         <div id="editControls" class="edit-controls" style="display: none;"></div>
-        <div id="animationResult" class="animation-container"></div>
+        <div id="animationResult" class="animation-container" style="display: none;"></div>
     </div>
 
     <script src="../static/script.js"></script>
     <script>
         let originalExtractedImage = null;
         let texts = [];
+        let currentLabel = null;
+        let fullImageBox = null; // Store the bounding box of the extracted region
+        let fullImageWidth = 0;
+        let fullImageHeight = 0;
+        let editControlsVisible = false; // Track if edit controls are visible
 
         async function detectObjects() {
             const file = document.getElementById('imageInput').files[0];
@@ -74,25 +97,176 @@
 
             originalExtractedImage = result.image;
             texts = [];
+            fullImageBox = result.box; // [startX, startY, endX, endY]
+            fullImageWidth = result.full_width;
+            fullImageHeight = result.full_height;
+
             const extractedDiv = document.getElementById('extractedImage');
-            extractedDiv.innerHTML = `<img id="extractedImg" src="data:image/png;base64,${result.image}" alt="Extracted Object"><br>
-                <button class="glow-btn" onclick="animateObject('${result.image}', '${label}')">Animate ${label}</button>
+            extractedDiv.innerHTML = `
+                <div class="image-container">
+                    <div>
+                        <h3>Original Image</h3>
+                        <div class="image-wrapper">
+                            <img id="fullImg" src="data:image/png;base64,${result.full_image}" alt="Full Image" draggable="false">
+                            <canvas id="feedback-canvas"></canvas>
+                        </div>
+                    </div>
+                    <div>
+                        <h3>Extracted Object</h3>
+                        <img id="extractedImg" src="data:image/png;base64,${result.image}" alt="Extracted Object" draggable="false">
+                    </div>
+                </div>
                 <button class="glow-btn" onclick="showEditControls()">Edit Image</button>
-                <button class="glow-btn" onclick="downloadImage()">Download Image</button>`;
+                <button class="glow-btn" onclick="downloadImage()">Download Image</button>
+            `;
             document.getElementById('editControls').style.display = 'none';
+            editControlsVisible = false; // Reset edit controls visibility
+            setupFeedbackCanvas();
         }
 
-        async function animateObject(imageData, label) {
-            const response = await fetch('http://127.0.0.1:5000/animate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ image: imageData, label })
-            });
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
+        function setupFeedbackCanvas() {
+            const feedbackCanvas = document.getElementById('feedback-canvas');
+            const fullImg = document.getElementById('fullImg');
+            const extractedImg = document.getElementById('extractedImg');
+            const feedbackInstructions = document.getElementById('feedback-instructions');
+            const imageWrapper = fullImg.parentElement;
 
-            const animationDiv = document.getElementById('animationResult');
-            animationDiv.innerHTML = `<video controls autoplay src="${url}" class="animation-video"></video>`;
+            // Wait for the full image to load to get its dimensions
+            fullImg.onload = function() {
+                // Set canvas dimensions to match the full image
+                feedbackCanvas.width = fullImg.width;
+                feedbackCanvas.height = fullImg.height;
+
+                // Position the canvas relative to the image-wrapper
+                feedbackCanvas.style.position = 'absolute';
+                feedbackCanvas.style.top = '0';
+                feedbackCanvas.style.left = '0';
+                feedbackCanvas.style.zIndex = '100'; // Ensure canvas is on top
+                feedbackCanvas.style.pointerEvents = 'auto'; // Ensure the canvas captures events
+
+                // Show instructions
+                feedbackInstructions.style.display = 'block';
+                console.log("Feedback canvas initialized with dimensions:", feedbackCanvas.width, "x", feedbackCanvas.height);
+            };
+
+            // If the image is already loaded (e.g., cached), trigger onload manually
+            if (fullImg.complete) {
+                fullImg.onload();
+            }
+
+            // Prevent default drag behavior on the image
+            fullImg.addEventListener('dragstart', (event) => {
+                event.preventDefault();
+                console.log("Drag prevented on full image");
+            });
+
+            const ctx = feedbackCanvas.getContext('2d');
+            let points = [];
+            let labels = [];
+
+            // Handle clicks on the canvas (over the full image)
+            feedbackCanvas.addEventListener('click', function(event) {
+                event.preventDefault();
+                const rect = feedbackCanvas.getBoundingClientRect();
+                const displayX = event.clientX - rect.left;
+                const displayY = event.clientY - rect.top;
+
+                // Scale display coordinates to the original image dimensions
+                const scaleX = fullImageWidth / fullImg.width;
+                const scaleY = fullImageHeight / fullImg.height;
+                let x = displayX * scaleX;
+                let y = displayY * scaleY;
+
+                // Map coordinates to the ROI (subtract startX, startY)
+                const [startX, startY] = fullImageBox;
+                x -= startX;
+                y -= startY;
+
+                const label = event.button === 2 ? 0 : 1; // 1 for include (left click), 0 for exclude (right click)
+
+                // Consolidate nearby points (within 10 pixels in original image scale)
+                let addPoint = true;
+                for (let i = 0; i < points.length; i++) {
+                    const [px, py] = points[i];
+                    const distance = Math.sqrt((px - x) ** 2 + (py - y) ** 2);
+                    if (distance < 10) {
+                        addPoint = false;
+                        break;
+                    }
+                }
+
+                if (addPoint) {
+                    points.push([x, y]);
+                    labels.push(label);
+
+                    // Draw a dot on the canvas at the display coordinates
+                    ctx.beginPath();
+                    ctx.arc(displayX, displayY, 5, 0, 2 * Math.PI);
+                    ctx.fillStyle = label === 1 ? 'green' : 'red';
+                    ctx.fill();
+                    ctx.closePath();
+
+                    console.log(`Click recorded: x=${x}, y=${y}, label=${label}`);
+                }
+            });
+
+            // Prevent the browser's context menu on right-click
+            feedbackCanvas.addEventListener('contextmenu', function(event) {
+                event.preventDefault();
+                console.log("Context menu prevented on canvas");
+            });
+
+            // Prevent context menu on the full image as well
+            fullImg.addEventListener('contextmenu', function(event) {
+                event.preventDefault();
+                console.log("Context menu prevented on full image");
+            });
+
+            // Submit feedback on Enter key press
+            document.addEventListener('keydown', function(event) {
+                if (event.key === 'Enter' && points.length > 0) {
+                    console.log("Submitting feedback:", { points, labels });
+                    fetch('http://127.0.0.1:5000/refine', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ points: points, labels: labels }),
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.image) {
+                            originalExtractedImage = data.image;
+                            const extractedImg = document.getElementById('extractedImg');
+                            extractedImg.src = 'data:image/png;base64,' + data.image;
+                            points = [];
+                            labels = [];
+                            ctx.clearRect(0, 0, feedbackCanvas.width, feedbackCanvas.height);
+                            if (editControlsVisible) {
+                                updateImage(); // Reapply edits only if edit controls are visible
+                            }
+                            console.log("Segmentation refined successfully");
+                        } else if (data.error) {
+                            console.error('Error:', data.error);
+                            alert('Failed to refine segmentation: ' + data.error);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('Failed to refine segmentation: ' + error.message);
+                    });
+                }
+            });
+
+            // Adjust canvas dimensions on window resize
+            window.addEventListener('resize', () => {
+                feedbackCanvas.width = fullImg.width;
+                feedbackCanvas.height = fullImg.height;
+                points = []; // Clear points on resize to avoid misalignment
+                labels = [];
+                ctx.clearRect(0, 0, feedbackCanvas.width, feedbackCanvas.height);
+                console.log("Canvas resized to:", feedbackCanvas.width, "x", feedbackCanvas.height);
+            });
         }
 
         function fileToBase64(file) {
@@ -106,6 +280,7 @@
         function showEditControls() {
             const editControls = document.getElementById('editControls');
             editControls.style.display = 'block';
+            editControlsVisible = true; // Set flag to true
             editControls.innerHTML = `
                 <div class="control-group">
                     <label>Brightness:</label>
@@ -216,14 +391,17 @@
         }
 
         function updateImage() {
-            const brightness = document.getElementById('brightness').value;
-            const contrast = document.getElementById('contrast').value;
-            const saturation = document.getElementById('saturation').value;
-            const blur = document.getElementById('blur').value;
-            const rotation = document.getElementById('rotation').value;
-            const flipH = document.getElementById('flipH').checked;
-            const flipV = document.getElementById('flipV').checked;
-            const textColor = document.getElementById('textColor').value;
+            // Check if edit controls are visible
+            if (!editControlsVisible) return;
+
+            const brightness = document.getElementById('brightness')?.value || 100;
+            const contrast = document.getElementById('contrast')?.value || 100;
+            const saturation = document.getElementById('saturation')?.value || 100;
+            const blur = document.getElementById('blur')?.value || 0;
+            const rotation = document.getElementById('rotation')?.value || 0;
+            const flipH = document.getElementById('flipH')?.checked || false;
+            const flipV = document.getElementById('flipV')?.checked || false;
+            const textColor = document.getElementById('textColor')?.value || '#ffffff';
 
             const img = new Image();
             img.src = `data:image/png;base64,${originalExtractedImage}`;
@@ -266,5 +444,6 @@
             link.click();
         }
     </script>
+    <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9201daa79855bfed',t:'MTc0MTkzNTIwNy4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>
 </body>
 </html>

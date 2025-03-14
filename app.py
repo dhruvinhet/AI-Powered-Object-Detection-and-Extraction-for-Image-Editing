@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import cv2
 import numpy as np
@@ -8,8 +8,6 @@ import base64
 import torch
 from segment_anything import sam_model_registry, SamPredictor
 import os
-from diffusers import StableDiffusionPipeline
-from flask import render_template
 
 app = Flask(__name__)
 CORS(app)
@@ -18,15 +16,20 @@ CORS(app)
 with open("coco.names", "r") as f:
     classes = [line.strip() for line in f.readlines()]
 
-# Load YOLOv3 network (for detection)
+# YOLOv3 
 net = cv2.dnn.readNetFromDarknet("yolov3.cfg", "yolov3.weights")
 
-# Load SAM model (for segmentation)
+# SAM model 
 sam_checkpoint = "sam_vit_h_4b8939.pth"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 sam = sam_model_registry["vit_h"](checkpoint=sam_checkpoint)
 sam.to(device)
 predictor = SamPredictor(sam)
+
+# Global variables to store image data for refinement
+global_image = None
+global_roi = None
+global_box = None
 
 @app.route('/detect', methods=['POST'])
 def detect():
@@ -83,178 +86,132 @@ def detect():
 
 @app.route('/extract', methods=['POST'])
 def extract():
+    global global_image, global_roi, global_box
     data = request.json
     image_data = data['image']
     box = data['box']
 
-    image = Image.open(io.BytesIO(base64.b64decode(image_data))).convert("RGB")
-    image = np.array(image)
+    # Store the full image and box for refinement
+    try:
+        image = Image.open(io.BytesIO(base64.b64decode(image_data))).convert("RGB")
+        global_image = np.array(image)
+        global_box = box
 
-    (startX, startY, endX, endY) = box
-    roi = image[startY:endY, startX:endX]
+        # Get full image dimensions
+        full_height, full_width = global_image.shape[:2]
 
-    predictor.set_image(roi)
-    masks, _, _ = predictor.predict(
-        box=np.array([0, 0, roi.shape[1], roi.shape[0]]),
-        multimask_output=False,
-    )
-    mask = masks[0]
+        (startX, startY, endX, endY) = box
+        roi = global_image[startY:endY, startX:endX]
+        global_roi = roi.copy()  # Store ROI for initial extraction
 
-    mask = mask.astype(np.uint8) * 255
-    mask = cv2.resize(mask, (roi.shape[1], roi.shape[0]), interpolation=cv2.INTER_NEAREST)
+        predictor.set_image(roi)
+        masks, _, _ = predictor.predict(
+            box=np.array([0, 0, roi.shape[1], roi.shape[0]]),
+            multimask_output=False,
+        )
+        mask = masks[0]
 
-    extracted = cv2.cvtColor(roi, cv2.COLOR_RGB2BGRA)
-    extracted[:, :, 3] = mask
+        # Convert mask to uint8 and smooth it
+        mask = mask.astype(np.uint8) * 255
+        mask = cv2.GaussianBlur(mask, (5, 5), 1)  # Apply Gaussian blur for smoothing
+        mask = cv2.resize(mask, (roi.shape[1], roi.shape[0]), interpolation=cv2.INTER_CUBIC)  # Use cubic interpolation
 
-    extracted_rgb = cv2.cvtColor(extracted, cv2.COLOR_BGRA2RGBA)
-    img = Image.fromarray(extracted_rgb)
+        # Apply mask to ROI with anti-aliased edges
+        extracted = cv2.cvtColor(roi, cv2.COLOR_RGB2BGRA)
+        extracted[:, :, 3] = mask
 
-    buffered = io.BytesIO()
-    img.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        extracted_rgb = cv2.cvtColor(extracted, cv2.COLOR_BGRA2RGBA)
+        img = Image.fromarray(extracted_rgb)
 
-    if not img_str.strip():
-        return jsonify({"error": "Extracted image is blank"}), 400
+        buffered = io.BytesIO()
+        img.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-    return jsonify({"image": img_str})
+        if not img_str.strip():
+            return jsonify({"error": "Extracted image is blank"}), 400
 
-@app.route('/animate', methods=['POST'])
-def animate():
-    data = request.json
-    image_data = data['image']  # Base64 encoded extracted image
-    label = data['label']       # Detected object label (e.g., "car", "dog")
+        # Convert full image to base64 for display
+        full_img = Image.fromarray(global_image)
+        full_buffered = io.BytesIO()
+        full_img.save(full_buffered, format="PNG")
+        full_img_str = base64.b64encode(full_buffered.getvalue()).decode("utf-8")
 
-    # Decode the base64 image
-    img = Image.open(io.BytesIO(base64.b64decode(image_data))).convert("RGBA")
-    img = np.array(img)
+        return jsonify({
+            "image": img_str,  # Extracted ROI
+            "full_image": full_img_str,  # Full original image
+            "full_width": full_width,
+            "full_height": full_height,
+            "box": global_box  # [startX, startY, endX, endY]
+        })
+    except Exception as e:
+        print(f"Error in /extract: {str(e)}")
+        return jsonify({"error": f"Extraction failed: {str(e)}"}), 500
 
-    # Define video parameters
-    width, height = 640, 480  # Output video resolution
-    fps = 30
-    duration = 3  # Seconds
-    frames = fps * duration
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    output_path = "output_video.mp4"
-    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+@app.route('/refine', methods=['POST'])
+def refine():
+    global global_image, global_roi, global_box
+    # Check if global variables are set
+    if global_image is None or global_box is None:
+        print("Global variables not set: global_image or global_box is None")
+        return jsonify({"error": "No image data available for refinement"}), 400
 
-    # Resize extracted image to fit animation
-    obj_height, obj_width = img.shape[:2]
-    scale = min(height / 2 / obj_height, width / 4 / obj_width)
-    new_size = (int(obj_width * scale), int(obj_height * scale))
-    obj = cv2.resize(img, new_size, interpolation=cv2.INTER_AREA)
+    try:
+        data = request.json
+        points = np.array(data['points'])  # Array of [x, y] coordinates
+        labels = np.array(data['labels'])  # Array of 1 (include) or 0 (exclude)
 
-    # Create a simple background based on object type
-    def create_background(label):
-        bg = np.zeros((height, width, 4), dtype=np.uint8)
-        if label == "car":
-            # Road-like background
-            bg[:, :, 0] = 50  # Blue-ish gray (B)
-            bg[:, :, 1] = 50  # (G)
-            bg[:, :, 2] = 50  # (R)
-            bg[height-100:, :, :3] = [100, 100, 100]  # Gray road
-            bg[:, :, 3] = 255  # Fully opaque
-        elif label in ["dog", "cat", "horse"]:
-            # Grass-like background
-            bg[:, :, 0] = 34   # (B)
-            bg[:, :, 1] = 139  # Green (G)
-            bg[:, :, 2] = 34   # (R)
-            bg[:, :, 3] = 255  # Fully opaque
-        else:
-            # Sky blue default background
-            bg[:, :, 0] = 135  # (B)
-            bg[:, :, 1] = 206  # (G)
-            bg[:, :, 2] = 235  # (R)
-            bg[:, :, 3] = 255  # Fully opaque
-        return bg
+        # Debug: Log the received points and labels
+        print(f"Received points: {points}")
+        print(f"Received labels: {labels}")
 
-    # Define animation based on label
-    for frame in range(frames):
-        canvas = create_background(label)  # Initialize with background
+        # Use the full image for refinement
+        predictor.set_image(global_image)
 
-        if label == "car":
-            # Car "running" with slight rotation
-            x_pos = int((frame / frames) * (width - new_size[0]))
-            y_pos = height - new_size[1] - 50  # Near bottom (road)
-            angle = np.sin(frame * 0.1) * 5  # Slight tilt
-            rotated = rotate_image(obj, angle)
-            place_image(canvas, rotated, x_pos, y_pos)
+        # Adjust points to be relative to the full image
+        (startX, startY, endX, endY) = global_box
+        adjusted_points = points.copy()
+        adjusted_points[:, 0] += startX  # Shift x coordinates
+        adjusted_points[:, 1] += startY  # Shift y coordinates
 
-        elif label == "dog":
-            # Dog "walking" with bounce and flip
-            x_pos = int((frame / frames) * (width - new_size[0]))
-            y_offset = int(10 * np.sin(frame * 0.2))  # Bounce
-            y_pos = height - new_size[1] - 50 + y_offset
-            if frame % 20 < 10:  # Flip every 10 frames for "walking"
-                walking_obj = cv2.flip(obj, 1)  # Horizontal flip
-            else:
-                walking_obj = obj
-            place_image(canvas, walking_obj, x_pos, y_pos)
+        # Use the original box as a hint, but allow points to extend beyond it
+        masks, scores, _ = predictor.predict(
+            box=np.array(global_box),
+            point_coords=adjusted_points,
+            point_labels=labels,
+            multimask_output=True,  # Try multiple masks to get the best one
+        )
 
-        elif label == "cat":
-            # Cat "sleeping" (slight scale change for breathing)
-            x_pos = width // 2 - new_size[0] // 2  # Center horizontally
-            y_pos = height - new_size[1] - 50      # Near bottom
-            scale_factor = 1 + 0.05 * np.sin(frame * 0.1)  # Breathing effect
-            scaled = cv2.resize(obj, (int(new_size[0] * scale_factor), int(new_size[1] * scale_factor)))
-            place_image(canvas, scaled, x_pos - int(new_size[0] * (scale_factor - 1) / 2), y_pos)
+        # Select the mask with the highest score
+        best_mask_idx = np.argmax(scores)
+        mask = masks[best_mask_idx]
 
-        elif label == "horse":
-            # Horse "galloping" with bigger bounce
-            x_pos = int((frame / frames) * (width - new_size[0]))
-            y_offset = int(20 * np.sin(frame * 0.3))  # Larger bounce
-            y_pos = height - new_size[1] - 50 + y_offset
-            place_image(canvas, obj, x_pos, y_pos)
+        # Convert mask to uint8 and smooth it
+        mask = mask.astype(np.uint8) * 255
+        mask = cv2.GaussianBlur(mask, (5, 5), 1)  # Apply Gaussian blur for smoothing
+        mask = cv2.resize(mask, (endX - startX, endY - startY), interpolation=cv2.INTER_CUBIC)  # Use cubic interpolation
 
-        else:
-            # Default: slide across screen with slight rotation
-            x_pos = int((frame / frames) * (width - new_size[0]))
-            y_pos = height // 2 - new_size[1] // 2
-            angle = np.sin(frame * 0.1) * 10  # Gentle rotation
-            rotated = rotate_image(obj, angle)
-            place_image(canvas, rotated, x_pos, y_pos)
+        # Create a mask for the full image size
+        full_mask = np.zeros((global_image.shape[0], global_image.shape[1]), dtype=np.uint8)
+        full_mask[startY:endY, startX:endX] = mask
 
-        # Write frame to video
-        out.write(cv2.cvtColor(canvas, cv2.COLOR_RGBA2BGR))
+        # Apply the mask to the full image
+        extracted = cv2.cvtColor(global_image, cv2.COLOR_RGB2BGRA)
+        extracted[:, :, 3] = full_mask
 
-    out.release()
-    return send_file(output_path, mimetype='video/mp4', as_attachment=True, download_name=f"{label}_animation.mp4")
+        extracted_rgb = cv2.cvtColor(extracted, cv2.COLOR_BGRA2RGBA)
+        img = Image.fromarray(extracted_rgb)
 
-# Helper function to rotate an image
-def rotate_image(image, angle):
-    h, w = image.shape[:2]
-    center = (w // 2, h // 2)
-    M = cv2.getRotationMatrix2D(center, angle, 1.0)
-    rotated = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
-    return rotated
+        buffered = io.BytesIO()
+        img.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-# Corrected helper function to place an image on the canvas with transparency
-def place_image(canvas, obj, x, y):
-    obj_h, obj_w = obj.shape[:2]
-    # Ensure placement stays within bounds
-    x, y = max(0, x), max(0, y)
-    if x + obj_w > canvas.shape[1] or y + obj_h > canvas.shape[0]:
-        return  # Skip if out of bounds
+        if not img_str.strip():
+            return jsonify({"error": "Refined image is blank"}), 400
 
-    # Extract the region of interest (ROI) from the canvas
-    roi = canvas[y:y + obj_h, x:x + obj_w, :3]  # RGB only for blending
-    mask = obj[:, :, 3]  # Alpha channel of the object
-    mask_inv = cv2.bitwise_not(mask)
-
-    # Ensure ROI and mask have the same dimensions
-    if roi.shape[:2] != mask.shape:
-        mask = cv2.resize(mask, (roi.shape[1], roi.shape[0]), interpolation=cv2.INTER_NEAREST)
-        mask_inv = cv2.bitwise_not(mask)
-
-    # Prepare background and foreground (RGB only)
-    bg = cv2.bitwise_and(roi, roi, mask=mask_inv)
-    fg = cv2.bitwise_and(obj[:, :, :3], obj[:, :, :3], mask=mask)
-
-    # Combine background and foreground
-    combined = cv2.add(bg, fg)
-
-    # Update the canvas with the combined RGB and original alpha
-    canvas[y:y + obj_h, x:x + obj_w, :3] = combined
-    canvas[y:y + obj_h, x:x + obj_w, 3] = cv2.bitwise_or(canvas[y:y + obj_h, x:x + obj_w, 3], mask)
+        return jsonify({"image": img_str})
+    except Exception as e:
+        print(f"Error in /refine: {str(e)}")
+        return jsonify({"error": f"Refinement failed: {str(e)}"}), 500
 
 @app.route('/')
 def home():
@@ -271,5 +228,6 @@ def extraction():
 @app.route('/creator')
 def creator():
     return render_template('creator.html')
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

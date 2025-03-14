@@ -76,41 +76,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('resize', () => {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
-    });
-
-    // Navbar Hide/Show Logic
-    let hideTimeout;
-
-    function hideNavbar() {
-        navbar.classList.add('hidden');
-        menuToggle.style.display = 'block';
-    }
-
-    function showNavbar() {
-        navbar.classList.remove('hidden');
-        menuToggle.style.display = 'none';
-    }
-
-    document.addEventListener('mousemove', (e) => {
-        clearTimeout(hideTimeout);
-        if (e.clientY < 50 && !navbar.classList.contains('hidden')) {
-            showNavbar();
-        } else if (e.clientY > 50) {
-            hideTimeout = setTimeout(hideNavbar, 2000); // Hide after 2 seconds
-        }
-    });
-
-    menuToggle.addEventListener('click', () => {
-        if (navbar.classList.contains('hidden')) {
-            showNavbar();
-            hideTimeout = setTimeout(hideNavbar, 2000); // Hide again after 2 seconds
-        } else {
-            hideNavbar();
-        }
-    });
-
-    // Initial hide after page load
-    hideTimeout = setTimeout(hideNavbar, 2000);
+    }); 
 });
 
 // Replace the existing updateFlowchartLine function
