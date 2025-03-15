@@ -58,6 +58,9 @@
         let fullImageWidth = 0;
         let fullImageHeight = 0;
         let editControlsVisible = false; // Track if edit controls are visible
+        let fullImageData = null;
+        let points = []; // Ensure points is defined
+        let labels = []; // Ensure labels is defined
 
         async function detectObjects() {
             const file = document.getElementById('imageInput').files[0];
@@ -92,15 +95,14 @@
                 body: JSON.stringify({ image: img.split(',')[1], box })
             });
             const result = await response.json();
-
             if (result.error) return alert(result.error);
-
-            originalExtractedImage = result.image;
-            texts = [];
-            fullImageBox = result.box; // [startX, startY, endX, endY]
+        
+            originalExtractedImage = result.image; // Ensure this is the base64 string
+            fullImageData = result.full_image;
+            fullImageBox = result.box;
             fullImageWidth = result.full_width;
             fullImageHeight = result.full_height;
-
+        
             const extractedDiv = document.getElementById('extractedImage');
             extractedDiv.innerHTML = `
                 <div class="image-container">
@@ -120,8 +122,11 @@
                 <button class="glow-btn" onclick="downloadImage()">Download Image</button>
             `;
             document.getElementById('editControls').style.display = 'none';
-            editControlsVisible = false; // Reset edit controls visibility
+            editControlsVisible = false;
             setupFeedbackCanvas();
+        
+            // Log to confirm assignment
+            console.log("Extracted image assigned:", originalExtractedImage.substring(0, 50));
         }
 
         function setupFeedbackCanvas() {
@@ -161,8 +166,6 @@
             });
 
             const ctx = feedbackCanvas.getContext('2d');
-            let points = [];
-            let labels = [];
 
             // Handle clicks on the canvas (over the full image)
             feedbackCanvas.addEventListener('click', function(event) {
@@ -222,16 +225,21 @@
                 console.log("Context menu prevented on full image");
             });
 
+
             // Submit feedback on Enter key press
             document.addEventListener('keydown', function(event) {
                 if (event.key === 'Enter' && points.length > 0) {
                     console.log("Submitting feedback:", { points, labels });
                     fetch('http://127.0.0.1:5000/refine', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({ points: points, labels: labels }),
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            image: fullImageData,            // Send the complete fullImageData
+                            extractedImage: originalExtractedImage, // This was already correct
+                            points: points,
+                            labels: labels,
+                            box: fullImageBox
+                        })
                     })
                     .then(response => response.json())
                     .then(data => {
@@ -243,7 +251,7 @@
                             labels = [];
                             ctx.clearRect(0, 0, feedbackCanvas.width, feedbackCanvas.height);
                             if (editControlsVisible) {
-                                updateImage(); // Reapply edits only if edit controls are visible
+                                updateImage();
                             }
                             console.log("Segmentation refined successfully");
                         } else if (data.error) {
@@ -266,6 +274,10 @@
                 labels = [];
                 ctx.clearRect(0, 0, feedbackCanvas.width, feedbackCanvas.height);
                 console.log("Canvas resized to:", feedbackCanvas.width, "x", feedbackCanvas.height);
+    
+    
+                // Remove any reference to global_image here.  It's no longer needed. 
+                // The full image is sent with every refine request.
             });
         }
 

@@ -481,3 +481,7 @@ code {
     opacity: 1;
     visibility: visible;
 }
+
+.removew{
+    display: none;
+}

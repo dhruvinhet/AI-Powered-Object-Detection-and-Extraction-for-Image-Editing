@@ -26,10 +26,7 @@ sam = sam_model_registry["vit_h"](checkpoint=sam_checkpoint)
 sam.to(device)
 predictor = SamPredictor(sam)
 
-# Global variables to store image data for refinement
-global_image = None
-global_roi = None
-global_box = None
+
 
 @app.route('/detect', methods=['POST'])
 def detect():
@@ -86,23 +83,16 @@ def detect():
 
 @app.route('/extract', methods=['POST'])
 def extract():
-    global global_image, global_roi, global_box
     data = request.json
     image_data = data['image']
     box = data['box']
 
-    # Store the full image and box for refinement
     try:
         image = Image.open(io.BytesIO(base64.b64decode(image_data))).convert("RGB")
-        global_image = np.array(image)
-        global_box = box
-
-        # Get full image dimensions
-        full_height, full_width = global_image.shape[:2]
+        image_np = np.array(image)
 
         (startX, startY, endX, endY) = box
-        roi = global_image[startY:endY, startX:endX]
-        global_roi = roi.copy()  # Store ROI for initial extraction
+        roi = image_np[startY:endY, startX:endX]
 
         predictor.set_image(roi)
         masks, _, _ = predictor.predict(
@@ -111,12 +101,10 @@ def extract():
         )
         mask = masks[0]
 
-        # Convert mask to uint8 and smooth it
         mask = mask.astype(np.uint8) * 255
-        mask = cv2.GaussianBlur(mask, (5, 5), 1)  # Apply Gaussian blur for smoothing
-        mask = cv2.resize(mask, (roi.shape[1], roi.shape[0]), interpolation=cv2.INTER_CUBIC)  # Use cubic interpolation
+        mask = cv2.GaussianBlur(mask, (5, 5), 1)
+        mask = cv2.resize(mask, (roi.shape[1], roi.shape[0]), interpolation=cv2.INTER_CUBIC)
 
-        # Apply mask to ROI with anti-aliased edges
         extracted = cv2.cvtColor(roi, cv2.COLOR_RGB2BGRA)
         extracted[:, :, 3] = mask
 
@@ -131,10 +119,14 @@ def extract():
             return jsonify({"error": "Extracted image is blank"}), 400
 
         # Convert full image to base64 for display
+        global_image = np.array(image)
         full_img = Image.fromarray(global_image)
         full_buffered = io.BytesIO()
         full_img.save(full_buffered, format="PNG")
         full_img_str = base64.b64encode(full_buffered.getvalue()).decode("utf-8")
+
+        global_box = [startX, startY, endX, endY]
+        full_width, full_height = global_image.shape[1], global_image.shape[0]
 
         return jsonify({
             "image": img_str,  # Extracted ROI
@@ -149,54 +141,57 @@ def extract():
 
 @app.route('/refine', methods=['POST'])
 def refine():
-    global global_image, global_roi, global_box
-    # Check if global variables are set
-    if global_image is None or global_box is None:
-        print("Global variables not set: global_image or global_box is None")
-        return jsonify({"error": "No image data available for refinement"}), 400
-
     try:
         data = request.json
-        points = np.array(data['points'])  # Array of [x, y] coordinates
-        labels = np.array(data['labels'])  # Array of 1 (include) or 0 (exclude)
+        full_image_data = data.get('image')
+        extracted_image_data = data.get("extractedImage")
+        if not full_image_data:
+            return jsonify({"error": "No full image data provided"}), 400
+        if not extracted_image_data:
+            return jsonify({"error": "No extracted image data provided"}), 400
+        points = np.array(data['points'])
+        labels = np.array(data['labels'])
+        box = data['box']
 
-        # Debug: Log the received points and labels
-        print(f"Received points: {points}")
-        print(f"Received labels: {labels}")
+        full_image = Image.open(io.BytesIO(base64.b64decode(full_image_data))).convert("RGB")
+        full_image_np = np.array(full_image)
 
-        # Use the full image for refinement
-        predictor.set_image(global_image)
+        extracted_image = Image.open(io.BytesIO(base64.b64decode(extracted_image_data))).convert("RGBA")
+        extracted_image_np = np.array(extracted_image)
+        initial_mask = extracted_image_np[:, :, 3]  # Alpha channel from extracted image
 
-        # Adjust points to be relative to the full image
-        (startX, startY, endX, endY) = global_box
+        startX, startY, endX, endY = box
+        roi = full_image_np[startY:endY, startX:endX]
+        
+        # Resize initial_mask to match ROI dimensions
+        if initial_mask.shape != (roi.shape[0], roi.shape[1]):
+            initial_mask = cv2.resize(initial_mask, (roi.shape[1], roi.shape[0]), interpolation=cv2.INTER_NEAREST)
+
+        predictor.set_image(full_image_np)
+
+        # Adjust points relative to full image
         adjusted_points = points.copy()
-        adjusted_points[:, 0] += startX  # Shift x coordinates
-        adjusted_points[:, 1] += startY  # Shift y coordinates
+        adjusted_points[:, 0] += startX
+        adjusted_points[:, 1] += startY
 
-        # Use the original box as a hint, but allow points to extend beyond it
-        masks, scores, _ = predictor.predict(
-            box=np.array(global_box),
+        masks, _, _ = predictor.predict(
             point_coords=adjusted_points,
             point_labels=labels,
-            multimask_output=True,  # Try multiple masks to get the best one
+            multimask_output=True
         )
 
-        # Select the mask with the highest score
-        best_mask_idx = np.argmax(scores)
-        mask = masks[best_mask_idx]
-
-        # Convert mask to uint8 and smooth it
+        # Crop the mask to the ROI size directly
+        best_mask = masks[0]  # Select the best mask
+        mask = best_mask[startY:endY, startX:endX]  # Crop to ROI
         mask = mask.astype(np.uint8) * 255
-        mask = cv2.GaussianBlur(mask, (5, 5), 1)  # Apply Gaussian blur for smoothing
-        mask = cv2.resize(mask, (endX - startX, endY - startY), interpolation=cv2.INTER_CUBIC)  # Use cubic interpolation
+        mask = cv2.GaussianBlur(mask, (5, 5), 1)
 
-        # Create a mask for the full image size
-        full_mask = np.zeros((global_image.shape[0], global_image.shape[1]), dtype=np.uint8)
-        full_mask[startY:endY, startX:endX] = mask
+        # Combine initial mask with refined mask (both should now match ROI size)
+        combined_mask = np.logical_or(initial_mask, mask).astype(np.uint8) * 255
 
-        # Apply the mask to the full image
-        extracted = cv2.cvtColor(global_image, cv2.COLOR_RGB2BGRA)
-        extracted[:, :, 3] = full_mask
+        # Apply the combined mask to the ROI
+        extracted = cv2.cvtColor(roi, cv2.COLOR_RGB2BGRA)
+        extracted[:, :, 3] = combined_mask  # Use combined_mask directly
 
         extracted_rgb = cv2.cvtColor(extracted, cv2.COLOR_BGRA2RGBA)
         img = Image.fromarray(extracted_rgb)
@@ -205,10 +200,8 @@ def refine():
         img.save(buffered, format="PNG")
         img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        if not img_str.strip():
-            return jsonify({"error": "Refined image is blank"}), 400
-
         return jsonify({"image": img_str})
+
     except Exception as e:
         print(f"Error in /refine: {str(e)}")
         return jsonify({"error": f"Refinement failed: {str(e)}"}), 500
