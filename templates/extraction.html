@@ -135,58 +135,67 @@
             const extractedImg = document.getElementById('extractedImg');
             const feedbackInstructions = document.getElementById('feedback-instructions');
             const imageWrapper = fullImg.parentElement;
-
+        
             // Wait for the full image to load to get its dimensions
             fullImg.onload = function() {
-                // Set canvas dimensions to match the full image
-                feedbackCanvas.width = fullImg.width;
-                feedbackCanvas.height = fullImg.height;
-
-                // Position the canvas relative to the image-wrapper
-                feedbackCanvas.style.position = 'absolute';
-                feedbackCanvas.style.top = '0';
-                feedbackCanvas.style.left = '0';
-                feedbackCanvas.style.zIndex = '100'; // Ensure canvas is on top
-                feedbackCanvas.style.pointerEvents = 'auto'; // Ensure the canvas captures events
-
-                // Show instructions
-                feedbackInstructions.style.display = 'block';
-                console.log("Feedback canvas initialized with dimensions:", feedbackCanvas.width, "x", feedbackCanvas.height);
+                // Ensure the image is fully loaded before setting canvas dimensions
+                setTimeout(() => {
+                    // Set canvas dimensions to match the *displayed* image dimensions
+                    feedbackCanvas.width = fullImg.clientWidth;
+                    feedbackCanvas.height = fullImg.clientHeight;
+        
+                    // Position the canvas relative to the image-wrapper
+                    feedbackCanvas.style.position = 'absolute';
+                    feedbackCanvas.style.top = '0';
+                    feedbackCanvas.style.left = '0';
+                    feedbackCanvas.style.zIndex = '100'; // Ensure canvas is on top
+                    feedbackCanvas.style.pointerEvents = 'auto'; // Ensure the canvas captures events
+        
+                    // Show instructions
+                    feedbackInstructions.style.display = 'block';
+                    console.log("Feedback canvas initialized with dimensions:", feedbackCanvas.width, "x", feedbackCanvas.height);
+                    console.log("fullImg dimensions:", fullImg.clientWidth, "x", fullImg.clientHeight);
+                    console.log("fullImageWidth:", fullImageWidth, "fullImageHeight:", fullImageHeight);
+                }, 100); // Small delay to ensure the image is rendered
             };
-
+        
             // If the image is already loaded (e.g., cached), trigger onload manually
             if (fullImg.complete) {
                 fullImg.onload();
             }
-
+        
             // Prevent default drag behavior on the image
             fullImg.addEventListener('dragstart', (event) => {
                 event.preventDefault();
                 console.log("Drag prevented on full image");
             });
-
+        
             const ctx = feedbackCanvas.getContext('2d');
-
+        
             // Handle clicks on the canvas (over the full image)
             feedbackCanvas.addEventListener('click', function(event) {
                 event.preventDefault();
                 const rect = feedbackCanvas.getBoundingClientRect();
                 const displayX = event.clientX - rect.left;
                 const displayY = event.clientY - rect.top;
-
+        
+                // Log raw click coordinates
+                console.log(`Raw click coordinates: clientX=${event.clientX}, clientY=${event.clientY}`);
+                console.log(`Canvas bounding rect: left=${rect.left}, top=${rect.top}`);
+                console.log(`Display coordinates: displayX=${displayX}, displayY=${displayY}`);
+        
                 // Scale display coordinates to the original image dimensions
-                const scaleX = fullImageWidth / fullImg.width;
-                const scaleY = fullImageHeight / fullImg.height;
+                const scaleX = fullImageWidth / fullImg.clientWidth;
+                const scaleY = fullImageHeight / fullImg.clientHeight;
                 let x = displayX * scaleX;
                 let y = displayY * scaleY;
-
-                // Map coordinates to the ROI (subtract startX, startY)
-                const [startX, startY] = fullImageBox;
-                x -= startX;
-                y -= startY;
-
+        
+                // Log scaling factors and scaled coordinates
+                console.log(`Scaling factors: scaleX=${scaleX}, scaleY=${scaleY}`);
+                console.log(`Scaled coordinates: x=${x}, y=${y}`);
+        
                 const label = event.button === 2 ? 0 : 1; // 1 for include (left click), 0 for exclude (right click)
-
+        
                 // Consolidate nearby points (within 10 pixels in original image scale)
                 let addPoint = true;
                 for (let i = 0; i < points.length; i++) {
@@ -197,35 +206,34 @@
                         break;
                     }
                 }
-
+        
                 if (addPoint) {
                     points.push([x, y]);
                     labels.push(label);
-
+        
                     // Draw a dot on the canvas at the display coordinates
                     ctx.beginPath();
                     ctx.arc(displayX, displayY, 5, 0, 2 * Math.PI);
                     ctx.fillStyle = label === 1 ? 'green' : 'red';
                     ctx.fill();
                     ctx.closePath();
-
+        
                     console.log(`Click recorded: x=${x}, y=${y}, label=${label}`);
                 }
             });
-
+        
             // Prevent the browser's context menu on right-click
             feedbackCanvas.addEventListener('contextmenu', function(event) {
                 event.preventDefault();
                 console.log("Context menu prevented on canvas");
             });
-
+        
             // Prevent context menu on the full image as well
             fullImg.addEventListener('contextmenu', function(event) {
                 event.preventDefault();
                 console.log("Context menu prevented on full image");
             });
-
-
+        
             // Submit feedback on Enter key press
             document.addEventListener('keydown', function(event) {
                 if (event.key === 'Enter' && points.length > 0) {
@@ -234,8 +242,8 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            image: fullImageData,            // Send the complete fullImageData
-                            extractedImage: originalExtractedImage, // This was already correct
+                            image: fullImageData,
+                            extractedImage: originalExtractedImage,
                             points: points,
                             labels: labels,
                             box: fullImageBox
@@ -265,22 +273,17 @@
                     });
                 }
             });
-
+        
             // Adjust canvas dimensions on window resize
             window.addEventListener('resize', () => {
-                feedbackCanvas.width = fullImg.width;
-                feedbackCanvas.height = fullImg.height;
+                feedbackCanvas.width = fullImg.clientWidth;
+                feedbackCanvas.height = fullImg.clientHeight;
                 points = []; // Clear points on resize to avoid misalignment
                 labels = [];
                 ctx.clearRect(0, 0, feedbackCanvas.width, feedbackCanvas.height);
                 console.log("Canvas resized to:", feedbackCanvas.width, "x", feedbackCanvas.height);
-    
-    
-                // Remove any reference to global_image here.  It's no longer needed. 
-                // The full image is sent with every refine request.
             });
         }
-
         function fileToBase64(file) {
             return new Promise((resolve) => {
                 const reader = new FileReader();
