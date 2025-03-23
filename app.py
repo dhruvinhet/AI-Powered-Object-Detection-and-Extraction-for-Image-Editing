@@ -188,7 +188,7 @@ def refine():
         print(f"Number of green points: {len(green_points)}")
 
         # Apply a manual offset to the coordinates (for debugging)
-        y_offset = 50  # Adjust this value based on the observed shift
+        y_offset = -150  # Adjust this value based on the observed shift
         green_points_adjusted = green_points.copy()
         green_points_adjusted[:, 1] += y_offset  # Add offset to y-coordinates
         print(f"Adjusted green points: {green_points_adjusted}")
