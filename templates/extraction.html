@@ -12,6 +12,7 @@
             flex-wrap: wrap;
             gap: 1rem;
             margin-bottom: 1rem;
+            align-items: flex-start;
         }
         .image-container img {
             max-width: 100%;
@@ -19,6 +20,21 @@
         }
         .image-wrapper {
             position: relative;
+            display: inline-block;
+        }
+        .image-wrapper img {
+            display: block; /* Remove any default inline spacing */
+            max-width: 100%;
+            height: auto;
+        }
+        
+        #feedback-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%; /* Match the image's width */
+            height: 100%; /* Match the image's height */
+            border: 1px solid red;
         }
     </style>
 </head>
@@ -51,30 +67,39 @@
 
     <script src="../static/script.js"></script>
     <script>
+        // Define fileToBase64 at the top to ensure availability
+        function fileToBase64(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.readAsDataURL(file);
+            });
+        }
+    
         let originalExtractedImage = null;
         let texts = [];
         let currentLabel = null;
-        let fullImageBox = null; // Store the bounding box of the extracted region
+        let fullImageBox = null;
         let fullImageWidth = 0;
         let fullImageHeight = 0;
-        let editControlsVisible = false; // Track if edit controls are visible
+        let editControlsVisible = false;
         let fullImageData = null;
-        let points = []; // Ensure points is defined
-        let labels = []; // Ensure labels is defined
-
+        let points = [];
+        let labels = [];
+    
         async function detectObjects() {
             const file = document.getElementById('imageInput').files[0];
             if (!file) return alert('Please upload an image.');
-
+    
             const formData = new FormData();
             formData.append('image', file);
-
+    
             const response = await fetch('http://127.0.0.1:5000/detect', {
                 method: 'POST',
                 body: formData
             });
             const detections = await response.json();
-
+    
             const resultsDiv = document.getElementById('detectionResults');
             resultsDiv.innerHTML = '';
             detections.forEach((det, index) => {
@@ -86,9 +111,9 @@
                 resultsDiv.appendChild(btn);
             });
         }
-
+    
         async function extractObject(file, box, label) {
-            const img = await fileToBase64(file);
+            const img = await fileToBase64(file);  // Now fileToBase64 is defined
             const response = await fetch('http://127.0.0.1:5000/extract', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -96,13 +121,13 @@
             });
             const result = await response.json();
             if (result.error) return alert(result.error);
-        
-            originalExtractedImage = result.image; // Ensure this is the base64 string
+    
+            originalExtractedImage = result.image;
             fullImageData = result.full_image;
             fullImageBox = result.box;
             fullImageWidth = result.full_width;
             fullImageHeight = result.full_height;
-        
+    
             const extractedDiv = document.getElementById('extractedImage');
             extractedDiv.innerHTML = `
                 <div class="image-container">
@@ -115,7 +140,7 @@
                     </div>
                     <div>
                         <h3>Extracted Object</h3>
-                        <img id="extractedImg" src="data:image/png;base64,${result.image}" alt="Extracted Object" draggable="false">
+                        <img id="extractedImg" src="data:image/png;base64,${result.image}" alt="Extracted Object  draggable="false">
                     </div>
                 </div>
                 <button class="glow-btn" onclick="showEditControls()">Edit Image</button>
@@ -124,83 +149,83 @@
             document.getElementById('editControls').style.display = 'none';
             editControlsVisible = false;
             setupFeedbackCanvas();
-        
-            // Log to confirm assignment
+    
             console.log("Extracted image assigned:", originalExtractedImage.substring(0, 50));
         }
-
+    
         function setupFeedbackCanvas() {
             const feedbackCanvas = document.getElementById('feedback-canvas');
             const fullImg = document.getElementById('fullImg');
-            const extractedImg = document.getElementById('extractedImg');
             const feedbackInstructions = document.getElementById('feedback-instructions');
-            const imageWrapper = fullImg.parentElement;
-        
-            // Wait for the full image to load to get its dimensions
-            fullImg.onload = function() {
-                // Ensure the image is fully loaded before setting canvas dimensions
-                setTimeout(() => {
-                    // Set canvas dimensions to match the *displayed* image dimensions
-                    feedbackCanvas.width = fullImg.clientWidth;
-                    feedbackCanvas.height = fullImg.clientHeight;
-        
-                    // Position the canvas relative to the image-wrapper
-                    feedbackCanvas.style.position = 'absolute';
-                    feedbackCanvas.style.top = '0';
-                    feedbackCanvas.style.left = '0';
-                    feedbackCanvas.style.zIndex = '100'; // Ensure canvas is on top
-                    feedbackCanvas.style.pointerEvents = 'auto'; // Ensure the canvas captures events
-        
-                    // Show instructions
-                    feedbackInstructions.style.display = 'block';
-                    console.log("Feedback canvas initialized with dimensions:", feedbackCanvas.width, "x", feedbackCanvas.height);
-                    console.log("fullImg dimensions:", fullImg.clientWidth, "x", fullImg.clientHeight);
-                    console.log("fullImageWidth:", fullImageWidth, "fullImageHeight:", fullImageHeight);
-                }, 100); // Small delay to ensure the image is rendered
-            };
-        
-            // If the image is already loaded (e.g., cached), trigger onload manually
-            if (fullImg.complete) {
-                fullImg.onload();
-            }
-        
-            // Prevent default drag behavior on the image
-            fullImg.addEventListener('dragstart', (event) => {
-                event.preventDefault();
-                console.log("Drag prevented on full image");
-            });
-        
             const ctx = feedbackCanvas.getContext('2d');
         
-            // Handle clicks on the canvas (over the full image)
+            // Define the offset values (in pixels)
+            const offsetTop = 30; // Offset from the top (keep this as 100px)
+            const offsetLeft = 0;  // Offset from the left (set to 0 to remove left offset)
+        
+            fullImg.onload = function() {
+                // Get the displayed dimensions of the image
+                const displayedWidth = fullImg.clientWidth;
+                const displayedHeight = fullImg.clientHeight;
+        
+                // Set the canvas dimensions to match the displayed image size
+                feedbackCanvas.width = displayedWidth;
+                feedbackCanvas.height = displayedHeight;
+        
+                // Set the CSS dimensions to match the displayed image size
+                feedbackCanvas.style.width = `${displayedWidth}px`;
+                feedbackCanvas.style.height = `${displayedHeight}px`;
+        
+                // Position the canvas with the offsets
+                feedbackCanvas.style.position = 'absolute';
+                feedbackCanvas.style.top = `${offsetTop}px`;  // Apply top offset
+                feedbackCanvas.style.left = `${offsetLeft}px`; // No left offset (0px)
+                feedbackCanvas.style.zIndex = '100';
+                feedbackCanvas.style.pointerEvents = 'auto';
+        
+                feedbackInstructions.style.display = 'block';
+        
+                console.log("Displayed dimensions:", displayedWidth, "x", displayedHeight);
+                console.log("Canvas dimensions:", feedbackCanvas.width, "x", feedbackCanvas.height);
+                console.log("Image position:", fullImg.getBoundingClientRect());
+                console.log("Canvas position:", feedbackCanvas.getBoundingClientRect());
+            };
+        
+            if (fullImg.complete) fullImg.onload();
+        
+            fullImg.addEventListener('dragstart', (e) => e.preventDefault());
+            feedbackCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+            fullImg.addEventListener('contextmenu', (e) => e.preventDefault());
+        
             feedbackCanvas.addEventListener('click', function(event) {
                 event.preventDefault();
                 const rect = feedbackCanvas.getBoundingClientRect();
                 const displayX = event.clientX - rect.left;
                 const displayY = event.clientY - rect.top;
         
-                // Log raw click coordinates
-                console.log(`Raw click coordinates: clientX=${event.clientX}, clientY=${event.clientY}`);
-                console.log(`Canvas bounding rect: left=${rect.left}, top=${rect.top}`);
+                console.log(`Raw click: clientX=${event.clientX}, clientY=${event.clientY}`);
+                console.log(`Canvas rect: left=${rect.left}, top=${rect.top}, width=${rect.width}, height=${rect.height}`);
                 console.log(`Display coordinates: displayX=${displayX}, displayY=${displayY}`);
         
-                // Scale display coordinates to the original image dimensions
-                const scaleX = fullImageWidth / fullImg.clientWidth;
-                const scaleY = fullImageHeight / fullImg.clientHeight;
-                let x = displayX * scaleX;
-                let y = displayY * scaleY;
+                // Check if the click is within the canvas boundaries
+                if (displayX < 0 || displayX > feedbackCanvas.width || displayY < 0 || displayY > feedbackCanvas.height) {
+                    console.log("Click outside canvas boundaries, ignoring:", displayX, displayY);
+                    return;
+                }
         
-                // Log scaling factors and scaled coordinates
-                console.log(`Scaling factors: scaleX=${scaleX}, scaleY=${scaleY}`);
-                console.log(`Scaled coordinates: x=${x}, y=${y}`);
+                // Scale display coordinates to original full image dimensions
+                const scaleX = fullImageWidth / feedbackCanvas.width;
+                const scaleY = fullImageHeight / feedbackCanvas.height;
+                const fullX = displayX * scaleX;
+                const fullY = displayY * scaleY;
         
-                const label = event.button === 2 ? 0 : 1; // 1 for include (left click), 0 for exclude (right click)
+                const label = event.button === 2 ? 0 : 1; // Left click = 1 (include), Right click = 0 (exclude)
         
-                // Consolidate nearby points (within 10 pixels in original image scale)
+                // Avoid duplicate points
                 let addPoint = true;
                 for (let i = 0; i < points.length; i++) {
                     const [px, py] = points[i];
-                    const distance = Math.sqrt((px - x) ** 2 + (py - y) ** 2);
+                    const distance = Math.sqrt((px - fullX) ** 2 + (py - fullY) ** 2);
                     if (distance < 10) {
                         addPoint = false;
                         break;
@@ -208,36 +233,22 @@
                 }
         
                 if (addPoint) {
-                    points.push([x, y]);
+                    points.push([fullX, fullY]);
                     labels.push(label);
         
-                    // Draw a dot on the canvas at the display coordinates
+                    // Draw dot on canvas
                     ctx.beginPath();
                     ctx.arc(displayX, displayY, 5, 0, 2 * Math.PI);
                     ctx.fillStyle = label === 1 ? 'green' : 'red';
                     ctx.fill();
                     ctx.closePath();
         
-                    console.log(`Click recorded: x=${x}, y=${y}, label=${label}`);
+                    console.log(`Full-image click: x=${fullX}, y=${fullY}, label=${label}`);
                 }
             });
         
-            // Prevent the browser's context menu on right-click
-            feedbackCanvas.addEventListener('contextmenu', function(event) {
-                event.preventDefault();
-                console.log("Context menu prevented on canvas");
-            });
-        
-            // Prevent context menu on the full image as well
-            fullImg.addEventListener('contextmenu', function(event) {
-                event.preventDefault();
-                console.log("Context menu prevented on full image");
-            });
-        
-            // Submit feedback on Enter key press
             document.addEventListener('keydown', function(event) {
                 if (event.key === 'Enter' && points.length > 0) {
-                    console.log("Submitting feedback:", { points, labels });
                     fetch('http://127.0.0.1:5000/refine', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -253,49 +264,41 @@
                     .then(data => {
                         if (data.image) {
                             originalExtractedImage = data.image;
-                            const extractedImg = document.getElementById('extractedImg');
-                            extractedImg.src = 'data:image/png;base64,' + data.image;
+                            document.getElementById('extractedImg').src = 'data:image/png;base64,' + data.image;
                             points = [];
                             labels = [];
                             ctx.clearRect(0, 0, feedbackCanvas.width, feedbackCanvas.height);
-                            if (editControlsVisible) {
-                                updateImage();
-                            }
-                            console.log("Segmentation refined successfully");
-                        } else if (data.error) {
-                            console.error('Error:', data.error);
-                            alert('Failed to refine segmentation: ' + data.error);
-                        }
+                            if (editControlsVisible) updateImage();
+                        } else if (data.error) alert('Failed to refine segmentation: ' + data.error);
                     })
-                    .catch(error => {
-                        console.error('Error:', error);
-                        alert('Failed to refine segmentation: ' + error.message);
-                    });
+                    .catch(error => alert('Failed to refine segmentation: ' + error.message));
                 }
             });
         
-            // Adjust canvas dimensions on window resize
             window.addEventListener('resize', () => {
-                feedbackCanvas.width = fullImg.clientWidth;
-                feedbackCanvas.height = fullImg.clientHeight;
-                points = []; // Clear points on resize to avoid misalignment
+                const displayedWidth = fullImg.clientWidth;
+                const displayedHeight = fullImg.clientHeight;
+        
+                feedbackCanvas.width = displayedWidth;
+                feedbackCanvas.height = displayedHeight;
+                feedbackCanvas.style.width = `${displayedWidth}px`;
+                feedbackCanvas.style.height = `${displayedHeight}px`;
+                feedbackCanvas.style.top = `${offsetTop}px`;  // Apply top offset
+                feedbackCanvas.style.left = `${offsetLeft}px`; // No left offset (0px)
+        
+                points = [];
                 labels = [];
                 ctx.clearRect(0, 0, feedbackCanvas.width, feedbackCanvas.height);
                 console.log("Canvas resized to:", feedbackCanvas.width, "x", feedbackCanvas.height);
             });
-        }
-        function fileToBase64(file) {
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.readAsDataURL(file);
-            });
-        }
+        }        
+        
+
 
         function showEditControls() {
             const editControls = document.getElementById('editControls');
             editControls.style.display = 'block';
-            editControlsVisible = true; // Set flag to true
+            editControlsVisible = true;
             editControls.innerHTML = `
                 <div class="control-group">
                     <label>Brightness:</label>
@@ -340,7 +343,7 @@
                     <button class="glow-btn" onclick="addText()">Add Text</button>
                 </div>
             `;
-
+    
             ['brightness', 'contrast', 'saturation', 'blur', 'rotation', 'flipH', 'flipV'].forEach(id => {
                 const element = document.getElementById(id);
                 if (element.type === 'range') {
@@ -351,11 +354,11 @@
             });
             document.getElementById('textColor').addEventListener('input', updateImage);
         }
-
+    
         function addText() {
             const textInput = document.getElementById('textInput').value.trim();
             if (!textInput) return alert('Please enter some text.');
-
+    
             const div = document.createElement('div');
             div.className = 'draggable-text';
             div.textContent = textInput;
@@ -364,27 +367,27 @@
             div.setAttribute('data-x', 50);
             div.setAttribute('data-y', 50);
             div.setAttribute('data-color', document.getElementById('textColor').value);
-
+    
             div.addEventListener('mousedown', startDragging);
             document.getElementById('extractedImage').appendChild(div);
             texts.push(div);
-
+    
             document.getElementById('textInput').value = '';
             updateImage();
         }
-
+    
         let draggedElement = null;
         let initialX, initialY;
-
+    
         function startDragging(e) {
             draggedElement = e.target;
             initialX = e.clientX - parseInt(draggedElement.getAttribute('data-x'));
             initialY = e.clientY - parseInt(draggedElement.getAttribute('data-y'));
-
+    
             document.addEventListener('mousemove', drag);
             document.addEventListener('mouseup', stopDragging);
         }
-
+    
         function drag(e) {
             if (draggedElement) {
                 const x = e.clientX - initialX;
@@ -396,7 +399,7 @@
                 updateImage();
             }
         }
-
+    
         function stopDragging() {
             if (draggedElement) {
                 document.removeEventListener('mousemove', drag);
@@ -404,11 +407,10 @@
                 draggedElement = null;
             }
         }
-
+    
         function updateImage() {
-            // Check if edit controls are visible
             if (!editControlsVisible) return;
-
+    
             const brightness = document.getElementById('brightness')?.value || 100;
             const contrast = document.getElementById('contrast')?.value || 100;
             const saturation = document.getElementById('saturation')?.value || 100;
@@ -417,7 +419,7 @@
             const flipH = document.getElementById('flipH')?.checked || false;
             const flipV = document.getElementById('flipV')?.checked || false;
             const textColor = document.getElementById('textColor')?.value || '#ffffff';
-
+    
             const img = new Image();
             img.src = `data:image/png;base64,${originalExtractedImage}`;
             img.onload = () => {
@@ -425,19 +427,19 @@
                 const ctx = canvas.getContext('2d');
                 canvas.width = img.width;
                 canvas.height = img.height;
-
+    
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 ctx.filter = `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%) blur(${blur}px)`;
                 ctx.setTransform(1, 0, 0, 1, 0, 0);
-
+    
                 ctx.translate(canvas.width / 2, canvas.height / 2);
                 if (flipH) ctx.scale(-1, 1);
                 if (flipV) ctx.scale(1, -1);
                 ctx.rotate((rotation * Math.PI) / 180);
                 ctx.translate(-canvas.width / 2, -canvas.height / 2);
-
+    
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
+    
                 ctx.setTransform(1, 0, 0, 1, 0, 0);
                 texts.forEach(text => {
                     const x = parseInt(text.getAttribute('data-x'));
@@ -446,12 +448,12 @@
                     ctx.font = '20px Poppins';
                     ctx.fillText(text.textContent, x, y);
                 });
-
+    
                 const updatedImage = canvas.toDataURL('image/png');
                 document.getElementById('extractedImg').src = updatedImage;
             };
         }
-
+    
         function downloadImage() {
             const link = document.createElement('a');
             link.href = document.getElementById('extractedImg').src;

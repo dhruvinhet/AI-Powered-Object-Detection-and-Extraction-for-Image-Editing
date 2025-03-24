@@ -91,34 +91,41 @@ def extract():
         image = Image.open(io.BytesIO(base64.b64decode(image_data))).convert("RGB")
         image_np = np.array(image)
 
+        # Preprocess image for better detection
+        image_np = cv2.normalize(image_np, None, 0, 255, cv2.NORM_MINMAX)
+
         (startX, startY, endX, endY) = box
-        roi = image_np[startY:endY, startX:endX]  # Extract ROI
+        # Shrink bounding box slightly
+        padding = 0.9
+        width = endX - startX
+        height = endY - startY
+        startX = int(startX + width * (1 - padding) / 2)
+        startY = int(startY + height * (1 - padding) / 2)
+        endX = int(endX - width * (1 - padding) / 2)
+        endY = int(endY - height * (1 - padding) / 2)
+        roi = image_np[startY:endY, startX:endX]
 
         predictor.set_image(roi)
-        masks, _, _ = predictor.predict(
+        masks, scores, _ = predictor.predict(
             box=np.array([0, 0, roi.shape[1], roi.shape[0]]),
-            multimask_output=False,
+            multimask_output=True
         )
-        mask = masks[0]
 
-        # Convert mask to uint8 and ensure it matches ROI dimensions
+        best_mask_idx = np.argmax(scores)
+        mask = masks[best_mask_idx]
         mask = mask.astype(np.uint8) * 255
         mask = cv2.GaussianBlur(mask, (5, 5), 1)
+
         if mask.shape != roi.shape[:2]:
             mask = cv2.resize(mask, (roi.shape[1], roi.shape[0]), interpolation=cv2.INTER_CUBIC)
 
-        # Apply mask to ROI
         extracted = cv2.cvtColor(roi, cv2.COLOR_RGB2BGRA)
-        extracted[:, :, 3] = mask  # Alpha channel
+        extracted[:, :, 3] = mask
 
-        # Create a blank canvas the size of the full image
         full_height, full_width = image_np.shape[:2]
-        full_extracted = np.zeros((full_height, full_width, 4), dtype=np.uint8)  # BGRA format
-
-        # Place the extracted ROI at the correct position in the full-sized canvas
+        full_extracted = np.zeros((full_height, full_width, 4), dtype=np.uint8)
         full_extracted[startY:endY, startX:endX] = extracted
 
-        # Convert to RGBA for consistency
         extracted_rgb = cv2.cvtColor(full_extracted, cv2.COLOR_BGRA2RGBA)
         img = Image.fromarray(extracted_rgb)
 
@@ -126,14 +133,13 @@ def extract():
         img.save(buffered, format="PNG")
         img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        if not img_str.strip():
-            return jsonify({"error": "Extracted image is blank"}), 400
-
-        # Full image for display
         full_img = Image.fromarray(image_np)
         full_buffered = io.BytesIO()
         full_img.save(full_buffered, format="PNG")
         full_img_str = base64.b64encode(full_buffered.getvalue()).decode("utf-8")
+
+        # Log the dimensions for debugging
+        print(f"Original image dimensions: width={image_np.shape[1]}, height={image_np.shape[0]}")
 
         return jsonify({
             "image": img_str,
@@ -148,6 +154,7 @@ def extract():
         print(f"Error in /extract: {str(e)}")
         return jsonify({"error": f"Extraction failed: {str(e)}"}), 500
 
+
 @app.route('/refine', methods=['POST'])
 def refine():
     try:
@@ -156,118 +163,72 @@ def refine():
         extracted_image_data = data.get('extractedImage')
         if not full_image_data or not extracted_image_data:
             return jsonify({"error": "Missing image data"}), 400
-        points = np.array(data['points'])
+        points = np.array(data['points'])  # Now full-image coordinates
         labels = np.array(data['labels'])
         box = data['box']
 
-        # Load full image
+        # Load images
         full_image = Image.open(io.BytesIO(base64.b64decode(full_image_data))).convert("RGB")
         full_image_np = np.array(full_image)
         extracted_image = Image.open(io.BytesIO(base64.b64decode(extracted_image_data))).convert("RGBA")
         extracted_image_np = np.array(extracted_image)
         initial_mask = extracted_image_np[:, :, 3]  # Alpha channel as initial mask
 
-        startX, startY, endX, endY = [int(x) for x in box]  # Ensure integers
+        full_height, full_width = full_image_np.shape[:2]
 
-        # Log dimensions for debugging
-        print(f"Full image dimensions: {full_image_np.shape}")
-        print(f"Initial mask dimensions: {initial_mask.shape}")
-        print(f"Points shape: {points.shape}")
-        print(f"Labels shape: {labels.shape}")
-        print(f"All points: {points}")
-        print(f"All labels: {labels}")
-
-        # Create a copy of the initial mask to modify
+        # Start with the full image mask (includes the entire car in the ROI)
         mask = initial_mask.copy()
 
-        # Separate green dots (include) and red dots (exclude)
-        green_points = points[labels == 1]  # Points with label 1 (include)
-
-        # Log green points
-        print(f"Green points: {green_points}")
-        print(f"Number of green points: {len(green_points)}")
-
-        # Apply a manual offset to the coordinates (for debugging)
-        y_offset = -150  # Adjust this value based on the observed shift
-        green_points_adjusted = green_points.copy()
-        green_points_adjusted[:, 1] += y_offset  # Add offset to y-coordinates
-        print(f"Adjusted green points: {green_points_adjusted}")
-
-        # Create a mask for the area to add (green dots)
-        added_area_mask = np.zeros_like(initial_mask, dtype=np.uint8)
+        # Process green points (include) to define the new area to add
+        green_points = points[labels == 1]
+        added_area_mask = np.zeros_like(mask, dtype=np.uint8)
         if len(green_points) > 0:
-            if len(green_points) >= 3:  # Need at least 3 points to form a convex hull
-                # Compute the convex hull of the green points
-                hull = cv2.convexHull(green_points_adjusted.astype(np.int32))
-                # Fill the convex hull to include the entire area
+            if len(green_points) >= 3:
+                hull = cv2.convexHull(green_points.astype(np.int32))
                 cv2.fillConvexPoly(added_area_mask, hull, 255)
                 print("Using convex hull to add area")
-            elif len(green_points) == 2:  # Special case for exactly 2 points
-                # Draw a rectangle between the two points
-                point1, point2 = green_points_adjusted
+            elif len(green_points) == 2:
+                point1, point2 = green_points
                 x1, y1 = [int(p) for p in point1]
                 x2, y2 = [int(p) for p in point2]
-                # Compute the bounding rectangle
-                top_left_x = max(0, min(x1, x2) - 20)  # Add padding
+                top_left_x = max(0, min(x1, x2) - 20)
                 top_left_y = max(0, min(y1, y2) - 20)
-                bottom_right_x = min(full_image_np.shape[1] - 1, max(x1, x2) + 20)
-                bottom_right_y = min(full_image_np.shape[0] - 1, max(y1, y2) + 20)
-                # Draw a filled rectangle
+                bottom_right_x = min(full_width - 1, max(x1, x2) + 20)
+                bottom_right_y = min(full_height - 1, max(y1, y2) + 20)
                 cv2.rectangle(added_area_mask, (top_left_x, top_left_y), (bottom_right_x, bottom_right_y), 255, -1)
                 print(f"Drawing rectangle from ({top_left_x}, {top_left_y}) to ({bottom_right_x}, {bottom_right_y})")
-            else:  # 1 point
-                # Draw a circle around the single point
+            else:
                 radius = 30
-                for point in green_points_adjusted:
+                for point in green_points:
                     x, y = [int(p) for p in point]
-                    x = max(0, min(x, full_image_np.shape[1] - 1))
-                    y = max(0, min(y, full_image_np.shape[0] - 1))
-                    print(f"Drawing circle at (x={x}, y={y}) with radius {radius}")
+                    x = max(0, min(x, full_width - 1))
+                    y = max(0, min(y, full_height - 1))
                     for dx in range(-radius, radius + 1):
                         for dy in range(-radius, radius + 1):
                             if dx*dx + dy*dy <= radius*radius:
-                                px = int(x + dx)
-                                py = int(y + dy)
-                                if 0 <= px < full_image_np.shape[1] and 0 <= py < full_image_np.shape[0]:
+                                px = x + dx
+                                py = y + dy
+                                if 0 <= px < full_width and 0 <= py < full_height:
                                     added_area_mask[py, px] = 255
+                    print(f"Drawing circle at (x={x}, y={y}) with radius {radius}")
 
-        # Log the number of non-zero pixels in added_area_mask to verify it’s not empty
-        print(f"Non-zero pixels in added_area_mask: {np.count_nonzero(added_area_mask)}")
-
-        # Merge the added area with the initial mask (logical OR)
+        # Merge the new area with the original mask
         mask = cv2.bitwise_or(mask, added_area_mask)
 
-        # Process red dots (exclude)
-        for point, label in zip(points, labels):
-            if label == 0:  # Only process red dots (exclude)
-                x, y = [int(p) for p in point]
-                x = max(0, min(x, full_image_np.shape[1] - 1))
-                y = max(0, min(y, full_image_np.shape[0] - 1))
-                y += y_offset  # Apply the same offset to red dots
-                for dx in range(-radius, radius + 1):
-                    for dy in range(-radius, radius + 1):
-                        if dx*dx + dy*dy <= radius*radius:
-                            px = int(x + dx)
-                            py = int(y + dy)
-                            if 0 <= px < full_image_np.shape[1] and 0 <= py < full_image_np.shape[0]:
-                                mask[py, px] = 0  # Set to fully transparent
-
-        # Apply a slight blur to smooth the edges
+        # Smooth the mask
         mask = cv2.GaussianBlur(mask, (5, 5), 1)
 
-        # Apply the refined mask to the full image
-        extracted = cv2.cvtColor(full_image_np, cv2.COLOR_RGB2BGRA)
-        extracted[:, :, 3] = mask  # Apply the updated mask
+        # Apply the updated mask to the full image
+        full_extracted = cv2.cvtColor(full_image_np, cv2.COLOR_RGB2BGRA)
+        full_extracted[:, :, 3] = mask  # Apply the full mask directly
 
-        # Convert back to RGBA for consistency
-        extracted_rgb = cv2.cvtColor(extracted, cv2.COLOR_BGRA2RGBA)
+        extracted_rgb = cv2.cvtColor(full_extracted, cv2.COLOR_BGRA2RGBA)
         img = Image.fromarray(extracted_rgb)
-
         buffered = io.BytesIO()
         img.save(buffered, format="PNG")
-        img_data = buffered.getvalue()
-        img_str = base64.b64encode(img_data).decode("utf-8")  # Encode to base64
-        return jsonify({"image": img_str})  # Return as JSON
+        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+        return jsonify({"image": img_str})
     except Exception as e:
         print(f"Error in /refine: {str(e)}")
         return jsonify({"error": f"Refinement failed: {str(e)}"}), 500
