@@ -159,69 +159,45 @@
             const feedbackInstructions = document.getElementById('feedback-instructions');
             const ctx = feedbackCanvas.getContext('2d');
         
-            // Define the offset values (in pixels)
-            const offsetTop = 30; // Offset from the top (keep this as 100px)
-            const offsetLeft = 0;  // Offset from the left (set to 0 to remove left offset)
-        
             fullImg.onload = function() {
-                // Get the displayed dimensions of the image
                 const displayedWidth = fullImg.clientWidth;
                 const displayedHeight = fullImg.clientHeight;
         
-                // Set the canvas dimensions to match the displayed image size
                 feedbackCanvas.width = displayedWidth;
                 feedbackCanvas.height = displayedHeight;
-        
-                // Set the CSS dimensions to match the displayed image size
                 feedbackCanvas.style.width = `${displayedWidth}px`;
                 feedbackCanvas.style.height = `${displayedHeight}px`;
-        
-                // Position the canvas with the offsets
-                feedbackCanvas.style.position = 'absolute';
-                feedbackCanvas.style.top = `${offsetTop}px`;  // Apply top offset
-                feedbackCanvas.style.left = `${offsetLeft}px`; // No left offset (0px)
+                feedbackCanvas.style.top = '30px'; // Consistent offset
+                feedbackCanvas.style.left = '0px';
                 feedbackCanvas.style.zIndex = '100';
                 feedbackCanvas.style.pointerEvents = 'auto';
         
                 feedbackInstructions.style.display = 'block';
-        
-                console.log("Displayed dimensions:", displayedWidth, "x", displayedHeight);
-                console.log("Canvas dimensions:", feedbackCanvas.width, "x", feedbackCanvas.height);
-                console.log("Image position:", fullImg.getBoundingClientRect());
-                console.log("Canvas position:", feedbackCanvas.getBoundingClientRect());
             };
         
             if (fullImg.complete) fullImg.onload();
         
-            fullImg.addEventListener('dragstart', (e) => e.preventDefault());
             feedbackCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
             fullImg.addEventListener('contextmenu', (e) => e.preventDefault());
         
-            feedbackCanvas.addEventListener('click', function(event) {
+            feedbackCanvas.addEventListener('mousedown', function(event) {
                 event.preventDefault();
                 const rect = feedbackCanvas.getBoundingClientRect();
                 const displayX = event.clientX - rect.left;
                 const displayY = event.clientY - rect.top;
         
-                console.log(`Raw click: clientX=${event.clientX}, clientY=${event.clientY}`);
-                console.log(`Canvas rect: left=${rect.left}, top=${rect.top}, width=${rect.width}, height=${rect.height}`);
-                console.log(`Display coordinates: displayX=${displayX}, displayY=${displayY}`);
-        
-                // Check if the click is within the canvas boundaries
                 if (displayX < 0 || displayX > feedbackCanvas.width || displayY < 0 || displayY > feedbackCanvas.height) {
                     console.log("Click outside canvas boundaries, ignoring:", displayX, displayY);
                     return;
                 }
         
-                // Scale display coordinates to original full image dimensions
                 const scaleX = fullImageWidth / feedbackCanvas.width;
                 const scaleY = fullImageHeight / feedbackCanvas.height;
                 const fullX = displayX * scaleX;
                 const fullY = displayY * scaleY;
         
-                const label = event.button === 2 ? 0 : 1; // Left click = 1 (include), Right click = 0 (exclude)
+                const label = event.button === 2 ? 0 : 1; // Right click = 0 (exclude), Left click = 1 (include)
         
-                // Avoid duplicate points
                 let addPoint = true;
                 for (let i = 0; i < points.length; i++) {
                     const [px, py] = points[i];
@@ -236,14 +212,13 @@
                     points.push([fullX, fullY]);
                     labels.push(label);
         
-                    // Draw dot on canvas
                     ctx.beginPath();
                     ctx.arc(displayX, displayY, 5, 0, 2 * Math.PI);
                     ctx.fillStyle = label === 1 ? 'green' : 'red';
                     ctx.fill();
                     ctx.closePath();
         
-                    console.log(`Full-image click: x=${fullX}, y=${fullY}, label=${label}`);
+                    console.log(`Point added: x=${fullX}, y=${fullY}, label=${label}`);
                 }
             });
         
@@ -283,17 +258,11 @@
                 feedbackCanvas.height = displayedHeight;
                 feedbackCanvas.style.width = `${displayedWidth}px`;
                 feedbackCanvas.style.height = `${displayedHeight}px`;
-                feedbackCanvas.style.top = `${offsetTop}px`;  // Apply top offset
-                feedbackCanvas.style.left = `${offsetLeft}px`; // No left offset (0px)
-        
                 points = [];
                 labels = [];
                 ctx.clearRect(0, 0, feedbackCanvas.width, feedbackCanvas.height);
-                console.log("Canvas resized to:", feedbackCanvas.width, "x", feedbackCanvas.height);
             });
-        }        
-        
-
+        }
 
         function showEditControls() {
             const editControls = document.getElementById('editControls');
@@ -461,6 +430,60 @@
             link.click();
         }
     </script>
+    <script>
+document.addEventListener('DOMContentLoaded', function() {
+    const feedbackCanvas = document.getElementById('feedback-canvas');
+    const ctx = feedbackCanvas.getContext('2d');
+    let points = [];
+    let labels = []; // 1 for include (green), 0 for exclude (red)
+
+    feedbackCanvas.addEventListener('mousedown', function(event) {
+        const rect = feedbackCanvas.getBoundingClientRect();
+        const displayX = event.clientX - rect.left;
+        const displayY = event.clientY - rect.top;
+
+        if (displayX < 0 || displayY < 0 || displayX > feedbackCanvas.width || displayY > feedbackCanvas.height) {
+            console.log("Click outside canvas boundaries, ignoring:", displayX, displayY);
+            return;
+        }
+
+        const scaleX = fullImageWidth / feedbackCanvas.width;
+        const scaleY = fullImageHeight / feedbackCanvas.height;
+        const fullX = displayX * scaleX;
+        const fullY = displayY * scaleY;
+
+        const label = event.button === 2 ? 0 : 1; // Left click = 1 (include), Right click = 0 (exclude)
+
+        let addPoint = true;
+        for (let i = 0; i < points.length; i++) {
+            const [px, py] = points[i];
+            const distance = Math.sqrt((px - fullX) ** 2 + (py - fullY) ** 2);
+            if (distance < 10) {
+                addPoint = false;
+                break;
+            }
+        }
+
+        if (addPoint) {
+            points.push([fullX, fullY]);
+            labels.push(label);
+
+            ctx.beginPath();
+            ctx.arc(displayX, displayY, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = label === 1 ? 'green' : 'red'; // Green for include, Red for exclude
+            ctx.fill();
+            ctx.closePath();
+
+            console.log(`Full-image click: x=${fullX}, y=${fullY}, label=${label}`);
+        }
+    });
+
+    // Prevent context menu on right-click
+    feedbackCanvas.addEventListener('contextmenu', function(event) {
+        event.preventDefault();
+    });
+});
+</script>
     <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9201daa79855bfed',t:'MTc0MTkzNTIwNy4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>
 </body>
 </html>

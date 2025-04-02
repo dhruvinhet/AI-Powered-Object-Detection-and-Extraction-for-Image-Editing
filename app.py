@@ -163,8 +163,8 @@ def refine():
         extracted_image_data = data.get('extractedImage')
         if not full_image_data or not extracted_image_data:
             return jsonify({"error": "Missing image data"}), 400
-        points = np.array(data['points'])  # Now full-image coordinates
-        labels = np.array(data['labels'])
+        points = np.array(data['points'])  # Full-image coordinates
+        labels = np.array(data['labels'])  # 1 for include (green), 0 for exclude (red)
         box = data['box']
 
         # Load images
@@ -175,18 +175,16 @@ def refine():
         initial_mask = extracted_image_np[:, :, 3]  # Alpha channel as initial mask
 
         full_height, full_width = full_image_np.shape[:2]
-
-        # Start with the full image mask (includes the entire car in the ROI)
         mask = initial_mask.copy()
 
-        # Process green points (include) to define the new area to add
+        # Process green points (include) to add areas
         green_points = points[labels == 1]
         added_area_mask = np.zeros_like(mask, dtype=np.uint8)
         if len(green_points) > 0:
             if len(green_points) >= 3:
                 hull = cv2.convexHull(green_points.astype(np.int32))
                 cv2.fillConvexPoly(added_area_mask, hull, 255)
-                print("Using convex hull to add area")
+                print("Added polygon area with convex hull from green points")
             elif len(green_points) == 2:
                 point1, point2 = green_points
                 x1, y1 = [int(p) for p in point1]
@@ -196,31 +194,51 @@ def refine():
                 bottom_right_x = min(full_width - 1, max(x1, x2) + 20)
                 bottom_right_y = min(full_height - 1, max(y1, y2) + 20)
                 cv2.rectangle(added_area_mask, (top_left_x, top_left_y), (bottom_right_x, bottom_right_y), 255, -1)
-                print(f"Drawing rectangle from ({top_left_x}, {top_left_y}) to ({bottom_right_x}, {bottom_right_y})")
+                print(f"Added rectangle from green points: ({top_left_x}, {top_left_y}) to ({bottom_right_x}, {bottom_right_y})")
             else:
                 radius = 30
                 for point in green_points:
                     x, y = [int(p) for p in point]
                     x = max(0, min(x, full_width - 1))
                     y = max(0, min(y, full_height - 1))
-                    for dx in range(-radius, radius + 1):
-                        for dy in range(-radius, radius + 1):
-                            if dx*dx + dy*dy <= radius*radius:
-                                px = x + dx
-                                py = y + dy
-                                if 0 <= px < full_width and 0 <= py < full_height:
-                                    added_area_mask[py, px] = 255
-                    print(f"Drawing circle at (x={x}, y={y}) with radius {radius}")
-
-        # Merge the new area with the original mask
+                    cv2.circle(added_area_mask, (x, y), radius, 255, -1)
+                    print(f"Added circle at (x={x}, y={y}) with radius {radius}")
         mask = cv2.bitwise_or(mask, added_area_mask)
+
+        # Process red points (exclude) to remove areas as a polygon
+        red_points = points[labels == 0]
+        removed_area_mask = np.zeros_like(mask, dtype=np.uint8)
+        if len(red_points) > 0:
+            if len(red_points) >= 3:
+                hull = cv2.convexHull(red_points.astype(np.int32))
+                cv2.fillConvexPoly(removed_area_mask, hull, 255)
+                print("Removed polygon area with convex hull from red points")
+            elif len(red_points) == 2:
+                point1, point2 = red_points
+                x1, y1 = [int(p) for p in point1]
+                x2, y2 = [int(p) for p in point2]
+                top_left_x = max(0, min(x1, x2) - 20)
+                top_left_y = max(0, min(y1, y2) - 20)
+                bottom_right_x = min(full_width - 1, max(x1, x2) + 20)
+                bottom_right_y = min(full_height - 1, max(y1, y2) + 20)
+                cv2.rectangle(removed_area_mask, (top_left_x, top_left_y), (bottom_right_x, bottom_right_y), 255, -1)
+                print(f"Removed rectangle from red points: ({top_left_x}, {top_left_y}) to ({bottom_right_x}, {bottom_right_y})")
+            else:
+                radius = 30
+                for point in red_points:
+                    x, y = [int(p) for p in point]
+                    x = max(0, min(x, full_width - 1))
+                    y = max(0, min(y, full_height - 1))
+                    cv2.circle(removed_area_mask, (x, y), radius, 255, -1)
+                    print(f"Removed circle at (x={x}, y={y}) with radius {radius}")
+        mask = cv2.bitwise_and(mask, cv2.bitwise_not(removed_area_mask))
 
         # Smooth the mask
         mask = cv2.GaussianBlur(mask, (5, 5), 1)
 
-        # Apply the updated mask to the full image
+        # Apply the updated mask
         full_extracted = cv2.cvtColor(full_image_np, cv2.COLOR_RGB2BGRA)
-        full_extracted[:, :, 3] = mask  # Apply the full mask directly
+        full_extracted[:, :, 3] = mask
 
         extracted_rgb = cv2.cvtColor(full_extracted, cv2.COLOR_BGRA2RGBA)
         img = Image.fromarray(extracted_rgb)
@@ -232,6 +250,8 @@ def refine():
     except Exception as e:
         print(f"Error in /refine: {str(e)}")
         return jsonify({"error": f"Refinement failed: {str(e)}"}), 500
+
+
 
 @app.route('/')
 def home():
