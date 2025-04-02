@@ -175,12 +175,43 @@ def refine():
         initial_mask = extracted_image_np[:, :, 3]  # Alpha channel as initial mask
 
         full_height, full_width = full_image_np.shape[:2]
-        mask = initial_mask.copy()
+        mask = np.zeros_like(initial_mask, dtype=np.uint8)  # Start with a blank mask
 
-        # Process green points (include) to add areas
+        # Process red points (label 0) to define the base area to keep
+        red_points = points[labels == 0]
+        if len(red_points) > 0:
+            red_area_mask = np.zeros_like(mask, dtype=np.uint8)
+            if len(red_points) >= 3:
+                hull = cv2.convexHull(red_points.astype(np.int32))
+                cv2.fillConvexPoly(red_area_mask, hull, 255)
+                print("Defined base mask with convex hull from red points")
+            elif len(red_points) == 2:
+                point1, point2 = red_points
+                x1, y1 = [int(p) for p in point1]
+                x2, y2 = [int(p) for p in point2]
+                top_left_x = max(0, min(x1, x2) - 20)
+                top_left_y = max(0, min(y1, y2) - 20)
+                bottom_right_x = min(full_width - 1, max(x1, x2) + 20)
+                bottom_right_y = min(full_height - 1, max(y1, y2) + 20)
+                cv2.rectangle(red_area_mask, (top_left_x, top_left_y), (bottom_right_x, bottom_right_y), 255, -1)
+                print(f"Defined base mask with rectangle from red points: ({top_left_x}, {top_left_y}) to ({bottom_right_x}, {bottom_right_y})")
+            else:
+                radius = 30
+                for point in red_points:
+                    x, y = [int(p) for p in point]
+                    x = max(0, min(x, full_width - 1))
+                    y = max(0, min(y, full_height - 1))
+                    cv2.circle(red_area_mask, (x, y), radius, 255, -1)
+                    print(f"Defined base mask with circle at (x={x}, y={y}) with radius {radius}")
+            mask = red_area_mask  # Set the mask to the red-dotted area
+        else:
+            mask = initial_mask.copy()  # If no red points, start with the original mask
+            print("No red points provided, starting with original mask")
+
+        # Process green points (label 1) to add areas to the mask
         green_points = points[labels == 1]
-        added_area_mask = np.zeros_like(mask, dtype=np.uint8)
         if len(green_points) > 0:
+            added_area_mask = np.zeros_like(mask, dtype=np.uint8)
             if len(green_points) >= 3:
                 hull = cv2.convexHull(green_points.astype(np.int32))
                 cv2.fillConvexPoly(added_area_mask, hull, 255)
@@ -203,35 +234,7 @@ def refine():
                     y = max(0, min(y, full_height - 1))
                     cv2.circle(added_area_mask, (x, y), radius, 255, -1)
                     print(f"Added circle at (x={x}, y={y}) with radius {radius}")
-        mask = cv2.bitwise_or(mask, added_area_mask)
-
-        # Process red points (exclude) to remove areas as a polygon
-        red_points = points[labels == 0]
-        removed_area_mask = np.zeros_like(mask, dtype=np.uint8)
-        if len(red_points) > 0:
-            if len(red_points) >= 3:
-                hull = cv2.convexHull(red_points.astype(np.int32))
-                cv2.fillConvexPoly(removed_area_mask, hull, 255)
-                print("Removed polygon area with convex hull from red points")
-            elif len(red_points) == 2:
-                point1, point2 = red_points
-                x1, y1 = [int(p) for p in point1]
-                x2, y2 = [int(p) for p in point2]
-                top_left_x = max(0, min(x1, x2) - 20)
-                top_left_y = max(0, min(y1, y2) - 20)
-                bottom_right_x = min(full_width - 1, max(x1, x2) + 20)
-                bottom_right_y = min(full_height - 1, max(y1, y2) + 20)
-                cv2.rectangle(removed_area_mask, (top_left_x, top_left_y), (bottom_right_x, bottom_right_y), 255, -1)
-                print(f"Removed rectangle from red points: ({top_left_x}, {top_left_y}) to ({bottom_right_x}, {bottom_right_y})")
-            else:
-                radius = 30
-                for point in red_points:
-                    x, y = [int(p) for p in point]
-                    x = max(0, min(x, full_width - 1))
-                    y = max(0, min(y, full_height - 1))
-                    cv2.circle(removed_area_mask, (x, y), radius, 255, -1)
-                    print(f"Removed circle at (x={x}, y={y}) with radius {radius}")
-        mask = cv2.bitwise_and(mask, cv2.bitwise_not(removed_area_mask))
+            mask = cv2.bitwise_or(mask, added_area_mask)  # Combine red and green areas
 
         # Smooth the mask
         mask = cv2.GaussianBlur(mask, (5, 5), 1)
