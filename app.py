@@ -8,75 +8,96 @@ import base64
 import torch
 from segment_anything import sam_model_registry, SamPredictor
 import os
+import requests
+from bs4 import BeautifulSoup
+import random
+from ultralytics import YOLO
 
 app = Flask(__name__)
 CORS(app)
 
-# Load class names
-with open("coco.names", "r") as f:
-    classes = [line.strip() for line in f.readlines()]
+# --- Model and Config URLs ---
+SAM_CHECKPOINT_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth"
 
-# YOLOv3 
-net = cv2.dnn.readNetFromDarknet("yolov3.cfg", "yolov3.weights")
+# --- File Paths ---
+SAM_CHECKPOINT_PATH = "sam_vit_h_4b8939.pth"
+YOLO_MODEL_PATH = "yolov8n.pt"
 
-# SAM model 
-sam_checkpoint = "sam_vit_h_4b8939.pth"
+# --- Download Function ---
+def download_file(url, path):
+    if not os.path.exists(path):
+        print(f"Downloading {os.path.basename(path)} from {url}...")
+        try:
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
+            with open(path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            print("Download complete.")
+        except requests.exceptions.RequestException as e:
+            print(f"Error downloading {os.path.basename(path)}: {e}")
+            exit() # Exit if a critical file can't be downloaded
+
+# --- Download all necessary files ---
+download_file(SAM_CHECKPOINT_URL, SAM_CHECKPOINT_PATH)
+
+# Load YOLOv8 model
+model = YOLO(YOLO_MODEL_PATH)
+
+# SAM model
 device = "cuda" if torch.cuda.is_available() else "cpu"
-sam = sam_model_registry["vit_h"](checkpoint=sam_checkpoint)
+sam = sam_model_registry["vit_h"](checkpoint=SAM_CHECKPOINT_PATH)
 sam.to(device)
 predictor = SamPredictor(sam)
 
-
-
+def scrape_ai_ml_facts():
+    url = "https://en.wikipedia.org/wiki/Artificial_intelligence"  # Replace with a real site containing AI/ML facts
+    try:
+        response = requests.get(url, timeout=10)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        # Adjust the selector based on the actual site's structure
+        facts = soup.select('p.fact')  # Hypothetical selector for fact paragraphs
+        return [fact.get_text().strip() for fact in facts if fact.get_text().strip()]
+    except Exception as e:
+        print(f"Scraping failed: {str(e)}")
+        # Fallback facts in case scraping fails
+        return [
+            "AI can process data 1000 times faster than a human brain.",
+            "Machine Learning models improve with more data over time.",
+            "The term 'Artificial Intelligence' was coined in 1956."
+        ]
+AI_ML_FACTS = [
+    "The term 'Artificial Intelligence' was coined by John McCarthy in 1956.",
+    "Machine Learning is a subset of AI that allows systems to learn from data.",
+    "The first AI program, Logic Theorist, was developed in 1955 by Herbert Simon and Allen Newell.",
+    "Deep Learning, a subset of ML, uses neural networks with many layers to analyze data.",
+    "In 1997, IBM's Deep Blue defeated world chess champion Garry Kasparov.",
+    "AI can process and analyze data 1000 times faster than a human brain.",
+    "The global AI market is expected to reach $500 billion by 2024.",
+    "Neural networks are inspired by the structure of the human brain.",
+    "AI is used in healthcare to predict diseases with up to 90% accuracy.",
+    "The first chatbot, ELIZA, was created in 1966 by Joseph Weizenbaum."
+]
 @app.route('/detect', methods=['POST'])
 def detect():
     file = request.files['image']
-    image = Image.open(file.stream)
-    image = np.array(image)
+    image = Image.open(file.stream).convert("RGB")
+    image_np = np.array(image)
 
-    (H, W) = image.shape[:2]
-
-    blob = cv2.dnn.blobFromImage(image, 1/255.0, (416, 416), swapRB=True, crop=False)
-    net.setInput(blob)
-    layer_names = net.getLayerNames()
-    output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
-    detections = net.forward(output_layers)
-
-    conf_threshold = 0.5
-    nms_threshold = 0.4
-
-    boxes = []
-    confidences = []
-    class_ids = []
-
-    for output in detections:
-        for detection in output:
-            scores = detection[5:]
-            class_id = np.argmax(scores)
-            confidence = scores[class_id]
-            if confidence > conf_threshold:
-                box = detection[0:4] * np.array([W, H, W, H])
-                (centerX, centerY, width, height) = box.astype("int")
-                startX = int(centerX - (width / 2))
-                startY = int(centerY - (height / 2))
-                boxes.append([startX, startY, int(width), int(height)])
-                confidences.append(float(confidence))
-                class_ids.append(class_id)
-
-    indices = cv2.dnn.NMSBoxes(boxes, confidences, conf_threshold, nms_threshold)
+    results = model(image_np)
 
     detections = []
-    if len(indices) > 0:
-        for i in indices.flatten():
-            box = boxes[i]
-            (startX, startY, width, height) = box
-            endX = startX + width
-            endY = startY + height
-            label = classes[class_ids[i]]
+    for r in results:
+        for box in r.boxes:
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            conf = float(box.conf[0])
+            cls = int(box.cls[0])
+            label = model.names[cls]
+
             detections.append({
                 "label": label,
-                "score": confidences[i],
-                "box": [startX, startY, endX, endY]
+                "score": conf,
+                "box": [x1, y1, x2, y2]
             })
 
     return jsonify(detections)
@@ -95,7 +116,6 @@ def extract():
         image_np = cv2.normalize(image_np, None, 0, 255, cv2.NORM_MINMAX)
 
         (startX, startY, endX, endY) = box
-        # Shrink bounding box slightly
         padding = 0.9
         width = endX - startX
         height = endY - startY
@@ -105,7 +125,7 @@ def extract():
         endY = int(endY - height * (1 - padding) / 2)
         roi = image_np[startY:endY, startX:endX]
 
-        predictor.set_image(roi)
+        predictor.set_image(cv2.cvtColor(roi, cv2.COLOR_RGB2BGR))
         masks, scores, _ = predictor.predict(
             box=np.array([0, 0, roi.shape[1], roi.shape[0]]),
             multimask_output=True
@@ -138,18 +158,22 @@ def extract():
         full_img.save(full_buffered, format="PNG")
         full_img_str = base64.b64encode(full_buffered.getvalue()).decode("utf-8")
 
-        # Log the dimensions for debugging
-        print(f"Original image dimensions: width={image_np.shape[1]}, height={image_np.shape[0]}")
+        # Use static facts
+        facts = AI_ML_FACTS
+        print(f"Sending facts: {facts}")  # Log all facts being sent
 
-        return jsonify({
+        response_data = {
             "image": img_str,
             "full_image": full_img_str,
             "full_width": image_np.shape[1],
             "full_height": image_np.shape[0],
             "box": [startX, startY, endX, endY],
             "roi_width": endX - startX,
-            "roi_height": endY - startY
-        })
+            "roi_height": endY - startY,
+            "facts": facts
+        }
+        print(f"Full response data: {response_data.keys()}")  # Log the keys of the response
+        return jsonify(response_data)
     except Exception as e:
         print(f"Error in /extract: {str(e)}")
         return jsonify({"error": f"Extraction failed: {str(e)}"}), 500
@@ -234,7 +258,7 @@ def refine():
                     y = max(0, min(y, full_height - 1))
                     cv2.circle(added_area_mask, (x, y), radius, 255, -1)
                     print(f"Added circle at (x={x}, y={y}) with radius {radius}")
-            mask = cv2.bitwise_or(mask, added_area_mask)  # Combine red and green areas
+            mask = cv2.bitwise_or(mask, added_area_mask)  
 
         # Smooth the mask
         mask = cv2.GaussianBlur(mask, (5, 5), 1)
@@ -273,4 +297,5 @@ def creator():
     return render_template('creator.html')
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    port = int(os.environ.get("PORT", 7860))
+    app.run(debug=True, host='0.0.0.0', port=port)

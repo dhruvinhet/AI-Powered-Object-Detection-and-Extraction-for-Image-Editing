@@ -1,7 +1,9 @@
 document.addEventListener('DOMContentLoaded', () => {
     const themeToggle = document.getElementById('theme-toggle');
     const navbar = document.querySelector('.navbar');
-    const menuToggle = document.getElementById('menu-toggle');
+    const menuToggle = document.getElementById('menuToggle'); // Get the menu toggle button
+    const navLinks = document.getElementById('navLinks'); // Get the navigation links
+
     const currentTheme = localStorage.getItem('theme') || 'light';
     
     if (currentTheme === 'dark') {
@@ -20,6 +22,14 @@ document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.setAttribute('data-theme', theme);
         localStorage.setItem('theme', theme);
     });
+
+    // Hamburger menu toggle
+    if (menuToggle && navLinks) {
+        menuToggle.addEventListener('click', () => {
+            menuToggle.classList.toggle('open');
+            navLinks.classList.toggle('open');
+        });
+    }
 
     // Particle Animation (Smooth Moving)
     const canvas = document.getElementById('particle-canvas');

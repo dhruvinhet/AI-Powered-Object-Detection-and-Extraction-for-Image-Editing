@@ -1,0 +1,11 @@
+flask
+flask_cors
+opencv-python-headless
+numpy
+pillow
+torch
+torchvision
+requests
+beautifulsoup4
+ultralytics
+git+https://github.com/facebookresearch/segment-anything.git

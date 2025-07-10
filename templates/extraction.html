@@ -36,16 +36,68 @@
             height: 100%; /* Match the image's height */
             border: 1px solid red;
         }
+        .fact-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 1rem;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .fact-text {
+            color: #fff;
+            font-size: 1.5rem;
+            text-align: center;
+            padding: 1.5rem;
+            background: rgba(0, 0, 0, 0.9);
+            border-radius: 10px;
+            max-width: 80%;
+            opacity: 0;
+            transform: translateY(20px);
+            animation: slideIn 0.5s forwards, glow 2s infinite alternate;
+        }
+        @keyframes slideIn {
+            0% { opacity: 0; transform: translateY(20px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes glow {
+            0% { box-shadow: 0 0 5px #3498db; }
+            100% { box-shadow: 0 0 20px #3498db; }
     </style>
 </head>
 <body>
     <canvas id="particle-canvas"></canvas>
     <nav class="navbar">
-        <a href="index.html" class="logo">AI4Image</a>
-        <ul class="nav-links">
-            <li><a href="generator.html">Image Generator</a></li>
-            <li><a href="extraction.html">Image Extraction</a></li>
-            <li><a href="creator.html">Creator</a></li>
+        <a href="/" class="logo">AI4Image</a>
+        <div class="menu-toggle" id="menuToggle">
+            <span></span>
+            <span></span>
+            <span></span>
+        </div>
+        <ul class="nav-links" id="navLinks">
+            <li><a href="/generator">Image Generator</a></li>
+            <li><a href="/extraction">Image Extraction</a></li>
+            <li><a href="/creator">Creator</a></li>
         </ul>
         <button id="theme-toggle" class="glow-btn">Toggle Theme</button>
     </nav>
@@ -94,7 +146,7 @@
             const formData = new FormData();
             formData.append('image', file);
     
-            const response = await fetch('http://127.0.0.1:5000/detect', {
+            const response = await fetch('/detect', {
                 method: 'POST',
                 body: formData
             });
@@ -113,44 +165,241 @@
         }
     
         async function extractObject(file, box, label) {
-            const img = await fileToBase64(file);  // Now fileToBase64 is defined
-            const response = await fetch('http://127.0.0.1:5000/extract', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ image: img.split(',')[1], box })
-            });
-            const result = await response.json();
-            if (result.error) return alert(result.error);
+            const img = await fileToBase64(file);
     
-            originalExtractedImage = result.image;
-            fullImageData = result.full_image;
-            fullImageBox = result.box;
-            fullImageWidth = result.full_width;
-            fullImageHeight = result.full_height;
+            // Create fact overlay
+            const overlay = document.createElement('div');
+            overlay.className = 'fact-overlay';
+            const loader = document.createElement('div');
+            loader.className = 'loader';
+            const factText = document.createElement('div');
+            factText.className = 'fact-text';
+            factText.textContent = "Extracting your image...";
+            overlay.appendChild(loader);
+            overlay.appendChild(factText);
+            document.body.appendChild(overlay);
     
-            const extractedDiv = document.getElementById('extractedImage');
-            extractedDiv.innerHTML = `
-                <div class="image-container">
-                    <div>
-                        <h3>Original Image</h3>
-                        <div class="image-wrapper">
-                            <img id="fullImg" src="data:image/png;base64,${result.full_image}" alt="Full Image" draggable="false">
-                            <canvas id="feedback-canvas"></canvas>
+            // Fade in overlay
+            setTimeout(() => {
+                overlay.style.opacity = '1';
+                console.log("Overlay faded in");
+            }, 10);
+    
+            try {
+                // Define temporary facts first
+                const tempFacts = [
+                    "Did you know? The term 'Artificial Intelligence' was coined by John McCarthy in 1956.",
+                    "Machine Learning is a subset of AI that allows systems to learn from data.",
+                    "The first AI program, Logic Theorist, was developed in 1955 by Herbert Simon and Allen Newell.",
+                    "Deep Learning, a subset of ML, uses neural networks with many layers to analyze data.",
+                    "In 1997, IBM's Deep Blue defeated world chess champion Garry Kasparov.",
+                    "AI can process and analyze data 1000 times faster than a human brain.",
+                    "The global AI market is expected to reach $500 billion by 2024.",
+                    "Neural networks are inspired by the structure of the human brain.",
+                    "AI is used in healthcare to predict diseases with up to 90% accuracy.",
+                    "The first chatbot, ELIZA, was created in 1966 by Joseph Weizenbaum.",
+                    "In 2016, Google's AlphaGo defeated world Go champion Lee Sedol.",
+                    "Machine Learning models can identify patterns in data that humans might miss.",
+                    "AI-powered virtual assistants like Siri and Alexa use natural language processing.",
+                    "The Turing Test, proposed by Alan Turing in 1950, evaluates a machine's ability to exhibit human-like intelligence.",
+                    "AI can generate realistic images using Generative Adversarial Networks (GANs).",
+                    "In 2020, AI was used to discover a new antibiotic called Halicin.",
+                    "Machine Learning algorithms power recommendation systems on Netflix and Spotify.",
+                    "AI can translate languages in real-time with over 95% accuracy.",
+                    "The first self-driving car was developed by Carnegie Mellon University in the 1980s.",
+                    "AI is used in finance to detect fraudulent transactions with high precision.",
+                    "Reinforcement Learning teaches AI to make decisions by rewarding good choices.",
+                    "In 2011, IBM's Watson won Jeopardy! against human champions.",
+                    "AI can predict weather patterns more accurately than traditional methods.",
+                    "The first neural network, the Perceptron, was invented in 1958 by Frank Rosenblatt.",
+                    "AI is used in agriculture to optimize crop yields and reduce waste.",
+                    "Machine Learning can identify cancer in medical images with 94% accuracy.",
+                    "AI-powered drones are used for search and rescue missions in disaster zones.",
+                    "The first AI conference, the Dartmouth Conference, was held in 1956.",
+                    "AI can compose music that mimics the style of famous composers like Mozart.",
+                    "In 2018, an AI-generated painting sold for $432,500 at Christie's auction house.",
+                    "Machine Learning models can predict stock market trends with varying success.",
+                    "AI is used in gaming to create intelligent non-player characters (NPCs).",
+                    "The first AI to pass the Turing Test was a chatbot named Eugene Goostman in 2014.",
+                    "AI can analyze social media data to predict election outcomes.",
+                    "Machine Learning is used in cybersecurity to detect and prevent cyber attacks.",
+                    "AI can generate human-like text using models like GPT-3, developed by OpenAI.",
+                    "In 2021, AI helped solve a 50-year-old biology problem: protein folding.",
+                    "AI is used in education to personalize learning experiences for students.",
+                    "Machine Learning can detect deepfake videos with increasing accuracy.",
+                    "AI-powered robots are used in manufacturing to assemble products faster.",
+                    "The first AI to beat humans at poker was Libratus, developed in 2017.",
+                    "AI can optimize energy consumption in smart grids to reduce waste.",
+                    "Machine Learning models can predict customer churn for businesses.",
+                    "AI is used in law enforcement to analyze surveillance footage.",
+                    "The first AI to write a screenplay, Sunspring, was created in 2016.",
+                    "AI can diagnose mental health conditions by analyzing speech patterns.",
+                    "Machine Learning is used in retail to forecast inventory needs.",
+                    "AI can create 3D models from 2D images using computer vision.",
+                    "In 2019, AI was used to identify new species of fish in the Pacific Ocean.",
+                    "AI-powered chatbots handle over 80% of customer service inquiries for some companies.",
+                    "Machine Learning can predict earthquakes by analyzing seismic data.",
+                    "AI is used in space exploration to analyze data from telescopes.",
+                    "The first AI to play video games at a superhuman level was DeepMind's AlphaStar.",
+                    "AI can generate realistic human faces that don't exist using GANs.",
+                    "Machine Learning models can optimize traffic flow in smart cities.",
+                    "AI is used in the military for autonomous drones and surveillance.",
+                    "The first AI to write a novel, 1 the Road, was created in 2018.",
+                    "AI can detect emotions in human faces with 85% accuracy.",
+                    "Machine Learning is used in logistics to optimize delivery routes.",
+                    "AI can create virtual fashion models for online clothing stores.",
+                    "In 2022, AI was used to restore damaged historical photographs.",
+                    "AI-powered systems can monitor wildlife populations using camera traps.",
+                    "Machine Learning can predict the spread of infectious diseases like COVID-19.",
+                    "AI is used in the film industry to create special effects and CGI.",
+                    "The first AI to compete in a debate, Project Debater, was developed by IBM in 2018.",
+                    "AI can analyze satellite imagery to monitor deforestation.",
+                    "Machine Learning models can predict customer preferences for targeted advertising.",
+                    "AI is used in archaeology to identify ancient artifacts in satellite images.",
+                    "The first AI to play Dota 2 at a professional level was OpenAI's Five in 2019.",
+                    "AI can generate synthetic voices that sound like real humans.",
+                    "Machine Learning is used in sports to analyze player performance.",
+                    "AI can detect plagiarism in academic papers with high accuracy.",
+                    "In 2023, AI was used to design a new type of battery for electric vehicles.",
+                    "AI-powered systems can monitor air quality in real-time.",
+                    "Machine Learning can predict the success of movies based on scripts.",
+                    "AI is used in architecture to design energy-efficient buildings.",
+                    "The first AI to create a video game, Angelina, was developed in 2011.",
+                    "AI can analyze DNA sequences to predict genetic diseases.",
+                    "Machine Learning is used in insurance to assess risk and set premiums.",
+                    "AI can generate realistic 3D environments for virtual reality.",
+                    "In 2020, AI was used to identify new craters on Mars.",
+                    "AI-powered systems can translate sign language into spoken words.",
+                    "Machine Learning can predict the shelf life of perishable goods.",
+                    "AI is used in journalism to generate news summaries automatically.",
+                    "The first AI to play Starcraft II at a grandmaster level was AlphaStar in 2019.",
+                    "AI can create personalized workout plans based on user data.",
+                    "Machine Learning is used in HR to screen resumes and identify top candidates.",
+                    "AI can detect fake news by analyzing the credibility of sources.",
+                    "In 2021, AI was used to discover new exoplanets in telescope data.",
+                    "AI-powered systems can monitor ocean health using underwater sensors.",
+                    "Machine Learning can predict the impact of climate change on ecosystems.",
+                    "AI is used in the food industry to develop new recipes.",
+                    "The first AI to play chess at a superhuman level was Deep Blue in 1997.",
+                    "AI can generate realistic simulations for training autonomous vehicles.",
+                    "Machine Learning is used in marketing to segment customers for campaigns.",
+                    "AI can analyze historical data to predict future economic trends.",
+                    "In 2022, AI was used to create a new language model for low-resource languages.",
+                    "AI-powered systems can assist in disaster response by analyzing real-time data."
+                ];
+    
+                // Start displaying facts immediately
+                let factInterval;
+                let facts = [...tempFacts]; // Start with temp facts
+                let factIndex = 0;
+    
+                console.log("Starting fact display loop with temp facts:", facts);
+                factInterval = setInterval(() => {
+                    console.log("Fact interval tick, current facts:", facts);
+                    factText.style.animation = 'none'; // Reset animation
+                    void factText.offsetWidth; // Trigger reflow to restart animation
+                    factText.style.animation = 'slideIn 0.5s forwards, glow 2s infinite alternate';
+                    
+                    factText.textContent = facts[factIndex];
+                    console.log("Displaying fact:", facts[factIndex]);
+                    factIndex = (factIndex + 1) % facts.length;
+                }, 4000); // Change fact every 4 seconds
+    
+                // Start the fetch request with a timeout
+                const fetchPromise = Promise.race([
+                    fetch('/extract', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ image: img.split(',')[1], box })
+                    }),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 1200000)) // 30-second timeout
+                ]);
+    
+                // Wait for the response
+                console.log("Waiting for fetch response...");
+                const response = await fetchPromise;
+                console.log("Fetch response received:", response);
+                const result = await response.json();
+                console.log("Parsed response:", result);
+    
+                // Update facts with the ones from the backend
+                console.log("Facts received:", result.facts);
+                if (result.facts && result.facts.length > 0) {
+                    facts.length = 0; // Clear the current facts
+                    facts.push(...result.facts); // Update with backend facts
+                    factIndex = 0; // Reset index to start from the first fact
+                    console.log("Updated facts to backend facts:", facts);
+    
+                    // Immediately display the first backend fact
+                    factText.style.animation = 'none'; // Reset animation
+                    void factText.offsetWidth; // Trigger reflow to restart animation
+                    factText.style.animation = 'slideIn 0.5s forwards, glow 2s infinite alternate';
+                    factText.textContent = facts[factIndex];
+                    console.log("Immediately displaying first backend fact:", facts[factIndex]);
+                    factIndex = (factIndex + 1) % facts.length;
+                } else {
+                    console.log("No facts received from backend, continuing with temp facts.");
+                    facts.length = 0;
+                    facts.push(...tempFacts); // Fallback to temp facts
+                }
+    
+                // Add a short delay to ensure at least one backend fact is displayed
+                await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+    
+                // Clear the interval and remove overlay
+                console.log("Clearing fact interval and removing overlay");
+                clearInterval(factInterval);
+                overlay.style.opacity = '0';
+                setTimeout(() => {
+                    document.body.removeChild(overlay);
+                    console.log("Overlay removed");
+                }, 500);
+    
+                if (result.error) {
+                    alert(result.error);
+                    return;
+                }
+    
+                originalExtractedImage = result.image;
+                fullImageData = result.full_image;
+                fullImageBox = result.box;
+                fullImageWidth = result.full_width;
+                fullImageHeight = result.full_height;
+    
+                const extractedDiv = document.getElementById('extractedImage');
+                extractedDiv.innerHTML = `
+                    <div class="image-container">
+                        <div>
+                            <h3>Original Image</h3>
+                            <div class="image-wrapper">
+                                <img id="fullImg" src="data:image/png;base64,${result.full_image}" alt="Full Image" draggable="false">
+                                <canvas id="feedback-canvas"></canvas>
+                            </div>
+                        </div>
+                        <div>
+                            <h3>Extracted Object</h3>
+                            <img id="extractedImg" src="data:image/png;base64,${result.image}" alt="Extracted Object" draggable="false">
                         </div>
                     </div>
-                    <div>
-                        <h3>Extracted Object</h3>
-                        <img id="extractedImg" src="data:image/png;base64,${result.image}" alt="Extracted Object  draggable="false">
-                    </div>
-                </div>
-                <button class="glow-btn" onclick="showEditControls()">Edit Image</button>
-                <button class="glow-btn" onclick="downloadImage()">Download Image</button>
-            `;
-            document.getElementById('editControls').style.display = 'none';
-            editControlsVisible = false;
-            setupFeedbackCanvas();
+                    <button class="glow-btn" onclick="showEditControls()">Edit Image</button>
+                    <button class="glow-btn" onclick="downloadImage()">Download Image</button>
+                `;
+                document.getElementById('editControls').style.display = 'none';
+                editControlsVisible = false;
+                setupFeedbackCanvas();
     
-            console.log("Extracted image assigned:", originalExtractedImage.substring(0, 50));
+                console.log("Extracted image assigned:", originalExtractedImage.substring(0, 50));
+            } catch (error) {
+                console.error("Extraction failed:", error);
+                factText.textContent = "An error occurred during extraction: " + error.message;
+                setTimeout(() => {
+                    overlay.style.opacity = '0';
+                    setTimeout(() => {
+                        document.body.removeChild(overlay);
+                        console.log("Overlay removed due to error");
+                    }, 500);
+                }, 2000);
+            }
         }
     
         function setupFeedbackCanvas() {
@@ -224,7 +473,7 @@
         
             document.addEventListener('keydown', function(event) {
                 if (event.key === 'Enter' && points.length > 0) {
-                    fetch('http://127.0.0.1:5000/refine', {
+                    fetch('/refine', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
